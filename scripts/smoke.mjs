@@ -43,6 +43,7 @@ async function fakeFetch(url, opts) {
     const fields = body.fields || {};
     posts.push(fields);
     for (const k of Object.keys(fields)) {
+      if (k.includes('@')) continue;                 // @odata.type-Annotation, keine Spalte
       if (!COLSET.has(k)) { sentUnknownColumn = true;
         return resp({ error: { code: 'invalidRequest', message: `Field '${k}' does not exist` } }, 400); }
     }
@@ -50,7 +51,8 @@ async function fakeFetch(url, opts) {
   }
   if (method === 'PATCH') {
     const fields = JSON.parse(opts.body || '{}');
-    for (const k of Object.keys(fields)) if (!COLSET.has(k)) { sentUnknownColumn = true; return resp({ error:{ message:'bad' } }, 400); }
+    for (const k of Object.keys(fields)) { if (k.includes('@')) continue;
+      if (!COLSET.has(k)) { sentUnknownColumn = true; return resp({ error:{ message:'bad' } }, 400); } }
     return resp({ id: 'patched' });
   }
   if (u.includes('/me?$select')) return resp({ userPrincipalName:'fedorov@dihag.com', mail:'fedorov@dihag.com', otherMails:[], proxyAddresses:[] });
@@ -117,6 +119,8 @@ async function main() {
   doc.querySelector('#visitors [data-f="funktion"]').value = 'Einkauf';       // Spalte fehlt → darf NICHT gesendet werden
   doc.querySelector('#visitors [data-f="tel"]').value = '0123';               // Spalte fehlt → darf NICHT gesendet werden
   doc.querySelector('#visitors [data-f="email"]').value = 'max@acme.example'; // Spalte existiert → wird gesendet
+  doc.querySelector('input[name="zweck"][value="Audit"]').checked = true;     // Multi-Choice
+  doc.querySelector('#visitors [data-psa][value="Schutzhelm"]').checked = true; // Multi-Choice
   doc.getElementById('f-shb').checked = true;
 
   // Unterschrift simulieren (setzt sigHasInk = true)
@@ -139,7 +143,10 @@ async function main() {
   ok(f.BesucherEmail === 'max@acme.example', 'Vorhandene Spalte BesucherEmail gesendet');
   ok(!('Funktion' in f), 'Fehlende Spalte Funktion NICHT gesendet');
   ok(!('BesucherTelefon' in f), 'Fehlende Spalte BesucherTelefon NICHT gesendet');
-  ok(Object.keys(f).every(k => COLSET.has(k)), 'Alle gesendeten Felder existieren als Spalte');
+  ok(Object.keys(f).every(k => k.includes('@') || COLSET.has(k)), 'Alle gesendeten Felder existieren als Spalte');
+  ok(Array.isArray(f.Besuchszweck) && f.Besuchszweck.join(',') === 'Audit', 'Besuchszweck als Array gesendet');
+  ok(f['Besuchszweck@odata.type'] === 'Collection(Edm.String)', 'Multi-Choice Besuchszweck mit @odata.type annotiert');
+  ok(f['PSA@odata.type'] === 'Collection(Edm.String)', 'Multi-Choice PSA mit @odata.type annotiert');
 
   console.log(failures ? `\nFEHLGESCHLAGEN: ${failures} Prüfung(en)` : '\nALLE PRÜFUNGEN BESTANDEN');
   process.exit(failures ? 1 : 0);

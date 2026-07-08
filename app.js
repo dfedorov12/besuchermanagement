@@ -428,12 +428,36 @@ function clearSig(){ const cv=$id('sig'); if(cv&&sigCtx){ sigCtx.clearRect(0,0,c
 
 // Setzt ein Feld nur, wenn die Spalte existiert und der Wert nicht leer ist.
 // Verhindert Graph-400 „Invalid request" durch nicht vorhandene Spalten.
+// Arrays (Mehrfachauswahl) werden mit @odata.type annotiert – ohne diese
+// Annotation lehnt Graph Multi-Choice-/Multi-Text-Spalten mit 400 ab.
 function putField(fields, key, value){
   if (!HAVE.has(key)) return;
   if (value === undefined || value === null) return;
   if (typeof value === 'string' && value.trim() === '') return;
-  if (Array.isArray(value) && value.length === 0) return;
+  if (Array.isArray(value)){
+    if (value.length === 0) return;
+    fields[C[key]] = value;
+    fields[C[key] + '@odata.type'] = 'Collection(Edm.String)';
+    return;
+  }
   fields[C[key]] = value;
+}
+
+// Beschriftungen + Typ-Hinweise für die Fehlerdiagnose
+const FIELD_LABELS = {
+  BesucherName:'Besucher (Titel)', Werk:'Werk', Bereich:'Bereich', AnsprechName:'Ansprechpartner-Name',
+  AnsprechTel:'Ansprechpartner-Telefon', Besuchsdatum:'Besuchsdatum', Ankunftszeit:'Ankunftszeit',
+  Firma:'Firma', Funktion:'Funktion', BesucherTelefon:'Besucher-Telefon', BesucherEmail:'E-Mail',
+  Autokennzeichen:'Autokennzeichen', Besuchszweck:'Besuchszweck', PSA:'PSA', SHBAkzeptiert:'SHB akzeptiert',
+  Signatur:'Signatur', Status:'Status', Bemerkungen:'Bemerkungen', GruppenId:'GruppenId'
+};
+function typeHint(key, value){
+  if (key==='Besuchszweck'||key==='PSA') return 'Spalte muss Typ <b>Auswahl</b> mit <b>Mehrfachauswahl</b> sein.';
+  if (key==='Werk'||key==='Status') return `Spalte muss Typ <b>Auswahl</b> sein und den Wert <b>„${esc(String(value))}"</b> als Option enthalten.`;
+  if (/datum|zeit/i.test(key)) return 'Spalte muss Typ <b>Datum/Uhrzeit</b> sein.';
+  if (key==='SHBAkzeptiert') return 'Spalte muss Typ <b>Ja/Nein</b> sein.';
+  if (key==='Signatur'||key==='Bemerkungen') return 'Spalte muss Typ <b>Mehrere Textzeilen</b> sein.';
+  return 'Spalte muss Typ <b>Einzelne Textzeile</b> sein.';
 }
 
 async function submitNew(){
@@ -465,37 +489,86 @@ async function submitNew(){
 
   const ansprechTel = $id('f-ansprechtel').value.trim();
   const bemerk = $id('f-bemerk').value.trim();
+  const common = { werk, bereich, ansprech, ansprechTel, datum, ankunftIso, firma, zweck, sig, bemerk, gruppenId };
   const btn = event?.target; if(btn){ btn.disabled=true; btn.textContent='Speichert …'; }
   const created = [];
   try{
     for (const v of visitors){
-      const fields = {};
-      putField(fields,'BesucherName', v.name);         // Title (immer vorhanden)
-      putField(fields,'Werk', werk);
-      putField(fields,'Bereich', bereich);
-      putField(fields,'AnsprechName', ansprech);
-      putField(fields,'AnsprechTel', ansprechTel);
-      putField(fields,'Besuchsdatum', new Date(datum+'T00:00:00').toISOString());
-      putField(fields,'Ankunftszeit', ankunftIso);
-      putField(fields,'Firma', firma);
-      putField(fields,'Funktion', v.funktion);
-      putField(fields,'BesucherTelefon', v.tel);
-      putField(fields,'BesucherEmail', v.email);
-      putField(fields,'Autokennzeichen', v.kennzeichen);
-      putField(fields,'Besuchszweck', zweck);
-      putField(fields,'PSA', v.psa);
-      putField(fields,'SHBAkzeptiert', true);
-      putField(fields,'Signatur', sig);
-      putField(fields,'Status', 'Angemeldet');
-      putField(fields,'Bemerkungen', bemerk);
-      putField(fields,'GruppenId', gruppenId);
-      await gPost(`/sites/${siteId}/lists/${listId}/items`, { fields });
+      const pairs = visitorFieldPairs(v, common);
+      try{
+        await gPost(`/sites/${siteId}/lists/${listId}/items`, { fields: pairsToFields(pairs) });
+      }catch(e){
+        if(/\b400\b/.test(e.message)){ if(btn){ btn.disabled=false; btn.textContent='Anmeldung speichern'; } await diagnoseAndReport(pairs); return; }
+        throw e;
+      }
       created.push(v);
     }
     toast(`${visitors.length} Anmeldung(en) gespeichert ✓`,'success');
     await loadItems();
     showPostSaveModal({ werk, bereich, ansprech, datum, firma, zweck }, created);
   }catch(e){ toast('Speichern fehlgeschlagen: '+e.message,'error'); if(btn){ btn.disabled=false; btn.textContent='Anmeldung speichern'; } }
+}
+
+// Logische (Key,Wert)-Paare eines Besuchers – Grundlage für Speichern & Diagnose.
+function visitorFieldPairs(v, c){
+  return [
+    ['BesucherName', v.name],
+    ['Werk', c.werk],
+    ['Bereich', c.bereich],
+    ['AnsprechName', c.ansprech],
+    ['AnsprechTel', c.ansprechTel],
+    ['Besuchsdatum', new Date(c.datum+'T00:00:00').toISOString()],
+    ['Ankunftszeit', c.ankunftIso],
+    ['Firma', c.firma],
+    ['Funktion', v.funktion],
+    ['BesucherTelefon', v.tel],
+    ['BesucherEmail', v.email],
+    ['Autokennzeichen', v.kennzeichen],
+    ['Besuchszweck', c.zweck],
+    ['PSA', v.psa],
+    ['SHBAkzeptiert', true],
+    ['Signatur', c.sig],
+    ['Status', 'Angemeldet'],
+    ['Bemerkungen', c.bemerk],
+    ['GruppenId', c.gruppenId]
+  ];
+}
+function pairsToFields(pairs){ const f={}; pairs.forEach(([k,v])=>putField(f,k,v)); return f; }
+
+// Bei 400: minimalen Datensatz anlegen und jedes Feld einzeln per PATCH testen,
+// um die von SharePoint abgelehnte(n) Spalte(n) exakt zu benennen. Danach aufräumen.
+async function diagnoseAndReport(pairs){
+  toast('Analysiere abgelehnte Felder …','info');
+  const itemsUrl = `/sites/${siteId}/lists/${listId}/items`;
+  const titleVal = (pairs.find(p=>p[0]==='BesucherName')?.[1]) || 'Diagnose (wird gelöscht)';
+  let testId = null;
+  try{
+    const cr = await gPost(itemsUrl, { fields: pairsToFields([['BesucherName', titleVal]]) });
+    testId = cr.id;
+  }catch(e){ showDiagModal([], 'Selbst ein minimaler Datensatz (nur Titel) wird abgelehnt: '+e.message); return; }
+  const bad = [];
+  for (const [k,v] of pairs){
+    if (k==='BesucherName') continue;
+    const mini = pairsToFields([[k,v]]);
+    if (!Object.keys(mini).length) continue;   // Spalte fehlt oder leer → wird ohnehin nicht gesendet
+    try{ await gPatch(`${itemsUrl}/${testId}/fields`, mini); }
+    catch(e){ if(/\b400\b/.test(e.message)) bad.push([k,v]); }
+  }
+  try{ await gDelete(`${itemsUrl}/${testId}`); }catch{}
+  showDiagModal(bad);
+}
+function showDiagModal(bad, fatal){
+  $id('modal-title').textContent = 'Speichern abgelehnt – Diagnose';
+  if (fatal){
+    $id('modal-body').innerHTML = `<p style="font-size:.88rem;color:#b91c1c">${esc(fatal)}</p>`;
+  } else if (!bad.length){
+    $id('modal-body').innerHTML = `<p style="font-size:.88rem;color:#374151">Kein einzelnes Feld ließ sich isolieren – bitte Konsole prüfen. Häufige Ursache: eine Auswahl-Spalte ohne passende Optionen.</p>`;
+  } else {
+    const rows = bad.map(([k,v])=>`<li style="margin-bottom:8px"><b>${esc(FIELD_LABELS[k]||k)}</b>${(v!=null&&v!=='')?` (Wert: ${esc(Array.isArray(v)?v.join(', '):String(v).slice(0,40))})`:''}<br><span class="dsgvo-hint">${typeHint(k,v)}</span></li>`).join('');
+    $id('modal-body').innerHTML = `<p style="font-size:.88rem;color:#374151;margin-bottom:8px">SharePoint lehnt diese Spalte(n) ab – Typ/Optionen in der Liste <b>${esc(SP_LIST)}</b> prüfen:</p><ul style="padding-left:18px">${rows}</ul>`;
+  }
+  $id('modal-footer').innerHTML = `<button class="btn btn-primary" onclick="closeModal()">Verstanden</button>`;
+  $id('modal-overlay').classList.remove('hidden');
 }
 
 // ── EINLADUNG PER E-MAIL (mailto – ohne Zusatzberechtigung) ──────────────────
