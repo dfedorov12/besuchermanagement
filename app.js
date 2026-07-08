@@ -17,7 +17,8 @@ const SP_SITE   = 'dihag.sharepoint.com:/sites/IT';
 const SP_LIST   = 'Besucheranmeldung';
 const ACCESS_LIST_NAME  = 'BESU_Konfiguration';
 const ACCESS_ITEM_TITLE = 'access';
-const ADMIN_EMAIL = 'administrator@dihag.com';
+// Admins: sehen alle Werke, dürfen Zugriffsrechte pflegen und löschen.
+const ADMIN_EMAILS = ['administrator@dihag.com', 'fedorov@dihag.com'];
 const API = 'https://graph.microsoft.com/v1.0';
 
 // Werke (Reihenfolge = Anzeige). Steuert den Zugriff.
@@ -147,7 +148,7 @@ async function discoverSP(){
 
 // ── ZUGRIFF: WERK + ROLLE ──────────────────────────────────────────────────
 function myUPN(){ return (account?.username||'').trim().toLowerCase(); }
-function isAdmin(){ return myUPN() === ADMIN_EMAIL; }
+function isAdmin(){ return ADMIN_EMAILS.includes(myUPN()); }
 
 async function loadMyIdentities(){
   _meIds = new Set();
