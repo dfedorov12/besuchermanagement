@@ -22,7 +22,7 @@ const ADMIN_EMAILS = ['administrator@dihag.com', 'fedorov@dihag.com'];
 const API = 'https://graph.microsoft.com/v1.0';
 
 // Werke (Reihenfolge = Anzeige). Steuert den Zugriff.
-const WERKE = ['DIHAG','DSO','EIS','EMH','EWA','Kein','Kernwerk','LEG','MEG','OZB','SCH','SHB','WGC','ZAI'];
+const WERKE = ['DIHAG','DSO','EIS','EWA','LEG','MEG','SCH','SHB','WGC','ZAI'];
 const BESUCHSZWECKE = ['Werksbesichtigung','Kundenbesuch','Audit','Lieferantenbesuch','Sonstiges','DIHAG'];
 const PSA_LISTE     = ['Schutzhelm','Schutzbrille','Eigene PSA','Warnweste','Gehörschutz'];
 const ROLLEN = {
@@ -35,6 +35,7 @@ const ROLLEN = {
 let msalApp = null, account = null;
 let siteId = null, listId = null, accessListId = null, accessConfigItemId = null;
 let C = {};                 // logischer Key → interner SP-Spaltenname
+let HAVE = new Set();       // logische Keys, für die eine SP-Spalte wirklich existiert
 let ITEMS = [];             // normalisierte Datensätze
 let accessUsers = {};       // { upn: { role, werke:[] } }
 let _meIds = null;
@@ -126,7 +127,7 @@ async function discoverSP(){
   const byName = new Map(), byDisp = new Map();
   (cols.value||[]).forEach(c=>{ byName.set((c.name||'').toLowerCase(), c.name); byDisp.set((c.displayName||'').toLowerCase(), c.name); });
   const missing = [];
-  C = {};
+  C = {}; HAVE = new Set();
   FIELD_DEFS.forEach(f=>{
     let internal = null;
     for (const cand of f.cands){
@@ -134,7 +135,7 @@ async function discoverSP(){
       if (byName.has(lc)) { internal = byName.get(lc); break; }
       if (byDisp.has(lc)) { internal = byDisp.get(lc); break; }
     }
-    if (internal) C[f.k] = internal;
+    if (internal) { C[f.k] = internal; HAVE.add(f.k); }
     else { C[f.k] = f.cands[0]; if (f.k!=='GruppenId') missing.push(f.cands[0]); }
   });
   if (missing.length){
@@ -360,7 +361,7 @@ function renderNewForm(){
     <div class="form-sub-h">Besuchszweck</div>
     <div class="zweck-grid">${zweckBoxes}</div>
 
-    <div class="form-sub-h">Besucher <span class="dsgvo-hint">— optionale Felder nur bei Bedarf ausfüllen (Datenminimierung)</span></div>
+    <div class="form-sub-h">Besucher</div>
     <div id="visitors"></div>
     <button class="btn btn-sm btn-outline" onclick="addVisitorRow()">+ weitere Person (gleiche Firma)</button>
 
@@ -425,6 +426,16 @@ function setupSignature(){
 }
 function clearSig(){ const cv=$id('sig'); if(cv&&sigCtx){ sigCtx.clearRect(0,0,cv.width,cv.height); sigHasInk=false; } }
 
+// Setzt ein Feld nur, wenn die Spalte existiert und der Wert nicht leer ist.
+// Verhindert Graph-400 „Invalid request" durch nicht vorhandene Spalten.
+function putField(fields, key, value){
+  if (!HAVE.has(key)) return;
+  if (value === undefined || value === null) return;
+  if (typeof value === 'string' && value.trim() === '') return;
+  if (Array.isArray(value) && value.length === 0) return;
+  fields[C[key]] = value;
+}
+
 async function submitNew(){
   const werk = $id('f-werk').value;
   const bereich = $id('f-bereich').value.trim();
@@ -452,42 +463,89 @@ async function submitNew(){
   const gruppenId = 'G'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
   const ankunftIso = $id('f-ankunft').value ? new Date(datum+'T'+$id('f-ankunft').value).toISOString() : null;
 
+  const ansprechTel = $id('f-ansprechtel').value.trim();
+  const bemerk = $id('f-bemerk').value.trim();
   const btn = event?.target; if(btn){ btn.disabled=true; btn.textContent='Speichert …'; }
+  const created = [];
   try{
     for (const v of visitors){
-      const fields = {
-        [C.BesucherName]: v.name,
-        [C.Werk]: werk,
-        [C.Bereich]: bereich,
-        [C.AnsprechName]: ansprech,
-        [C.AnsprechTel]: $id('f-ansprechtel').value.trim(),
-        [C.Besuchsdatum]: new Date(datum+'T00:00:00').toISOString(),
-        [C.Firma]: firma,
-        [C.Funktion]: v.funktion,
-        [C.BesucherTelefon]: v.tel,
-        [C.BesucherEmail]: v.email,
-        [C.Autokennzeichen]: v.kennzeichen,
-        [C.SHBAkzeptiert]: true,
-        [C.Signatur]: sig,
-        [C.Status]: 'Angemeldet',
-        [C.Bemerkungen]: $id('f-bemerk').value.trim(),
-        [C.GruppenId]: gruppenId
-      };
-      if (ankunftIso) fields[C.Ankunftszeit] = ankunftIso;
-      if (zweck.length) fields[C.Besuchszweck] = zweck;
-      if (v.psa.length) fields[C.PSA] = v.psa;
+      const fields = {};
+      putField(fields,'BesucherName', v.name);         // Title (immer vorhanden)
+      putField(fields,'Werk', werk);
+      putField(fields,'Bereich', bereich);
+      putField(fields,'AnsprechName', ansprech);
+      putField(fields,'AnsprechTel', ansprechTel);
+      putField(fields,'Besuchsdatum', new Date(datum+'T00:00:00').toISOString());
+      putField(fields,'Ankunftszeit', ankunftIso);
+      putField(fields,'Firma', firma);
+      putField(fields,'Funktion', v.funktion);
+      putField(fields,'BesucherTelefon', v.tel);
+      putField(fields,'BesucherEmail', v.email);
+      putField(fields,'Autokennzeichen', v.kennzeichen);
+      putField(fields,'Besuchszweck', zweck);
+      putField(fields,'PSA', v.psa);
+      putField(fields,'SHBAkzeptiert', true);
+      putField(fields,'Signatur', sig);
+      putField(fields,'Status', 'Angemeldet');
+      putField(fields,'Bemerkungen', bemerk);
+      putField(fields,'GruppenId', gruppenId);
       await gPost(`/sites/${siteId}/lists/${listId}/items`, { fields });
+      created.push(v);
     }
     toast(`${visitors.length} Anmeldung(en) gespeichert ✓`,'success');
     await loadItems();
-    navigate('checkin');
+    showPostSaveModal({ werk, bereich, ansprech, datum, firma, zweck }, created);
   }catch(e){ toast('Speichern fehlgeschlagen: '+e.message,'error'); if(btn){ btn.disabled=false; btn.textContent='Anmeldung speichern'; } }
+}
+
+// ── EINLADUNG PER E-MAIL (mailto – ohne Zusatzberechtigung) ──────────────────
+function inviteBody(head, v){
+  const L = [];
+  L.push(`Guten Tag ${v.name},`);
+  L.push('');
+  L.push(`wir laden Sie zu einem Besuch bei DIHAG (${head.werk}) ein.`);
+  L.push('');
+  L.push(`Datum: ${new Date(head.datum+'T00:00:00').toLocaleDateString('de-DE')}`);
+  L.push(`Bereich: ${head.bereich}`);
+  L.push(`Ansprechpartner: ${head.ansprech}`);
+  if (head.zweck && head.zweck.length) L.push(`Zweck: ${head.zweck.join(', ')}`);
+  L.push('');
+  L.push('Sicherheitshinweise (SHB): Auf dem Werksgelände gelten die Sicherheits- und PSA-Vorschriften.');
+  L.push('Die Sicherheitsunterweisung ist vor Betreten des Geländes am Empfang zu bestätigen (digitale Unterschrift).');
+  L.push('Bitte bringen Sie einen Lichtbildausweis mit; bei Anreise mit PKW bitte das Kennzeichen am Empfang angeben.');
+  L.push('');
+  L.push('Mit freundlichen Grüßen');
+  L.push(head.ansprech);
+  return L.join('\r\n');
+}
+function inviteMailto(head, v){
+  const subject = `Einladung zum Besuch bei DIHAG – ${new Date(head.datum+'T00:00:00').toLocaleDateString('de-DE')}`;
+  const href = `mailto:${encodeURIComponent(v.email||'')}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(inviteBody(head,v))}`;
+  window.location.href = href;
+}
+function showPostSaveModal(head, visitors){
+  $id('modal-title').textContent = 'Anmeldung gespeichert';
+  const rows = visitors.map((v,i)=>`
+    <div class="visitor-card" style="margin-bottom:8px">
+      <div class="vc-main"><div class="vc-name">${esc(v.name)}</div>
+        <div class="vc-sub">${v.email?esc(v.email):'<span style="color:#b45309">keine E-Mail hinterlegt</span>'}</div></div>
+      <div class="vc-actions">${v.email
+        ? `<button class="btn btn-sm btn-primary" onclick='inviteMailto(${JSON.stringify(head).replace(/'/g,"&#39;")}, ${JSON.stringify(v).replace(/'/g,"&#39;")})'>✉ Einladung</button>`
+        : ''}</div>
+    </div>`).join('');
+  $id('modal-body').innerHTML = `
+    <p style="font-size:.86rem;color:#374151;margin-bottom:10px">Einladungs-E-Mail an die Besucher senden (öffnet dein Outlook mit vorbereitetem Text inkl. Sicherheitshinweis):</p>
+    ${rows}
+    <p class="dsgvo-hint" style="margin-top:8px">Die digitale Unterschrift zur Sicherheitsunterweisung erfolgt beim Check-in am Empfang. Ein vorheriges digitales Signieren durch externe Besucher ist als Ausbaustufe möglich (separater Signatur-Link).</p>`;
+  $id('modal-footer').innerHTML = `<button class="btn btn-primary" onclick="closeModal();navigate('checkin')">Weiter zum Empfang</button>`;
+  $id('modal-overlay').classList.remove('hidden');
 }
 
 // ── CHECK-IN / CHECK-OUT ────────────────────────────────────────────────────
 async function checkIn(id){
   if(!canStamp()){ toast('Keine Berechtigung zum Stempeln.','error'); return; }
-  try{ await gPatch(`/sites/${siteId}/lists/${listId}/items/${id}/fields`, { [C.Eingangszeit]:new Date().toISOString(), [C.Status]:'Eingecheckt' });
+  const fields={}; putField(fields,'Eingangszeit',new Date().toISOString()); putField(fields,'Status','Eingecheckt');
+  try{ await gPatch(`/sites/${siteId}/lists/${listId}/items/${id}/fields`, fields);
     toast('Eingecheckt ✓','success'); await loadItems(); }
   catch(e){ toast('Fehler: '+e.message,'error'); }
 }
@@ -498,7 +556,8 @@ async function checkOut(id){
   if(it && (!it.werk || !it.bereich || !it.besucherName || !it.firma || !it.shb)){
     toast('Datensatz unvollständig – kann nicht geschlossen werden (Pflichtfelder/SHB).','error'); return;
   }
-  try{ await gPatch(`/sites/${siteId}/lists/${listId}/items/${id}/fields`, { [C.Abgangszeit]:new Date().toISOString(), [C.Status]:'Geschlossen' });
+  const fields={}; putField(fields,'Abgangszeit',new Date().toISOString()); putField(fields,'Status','Geschlossen');
+  try{ await gPatch(`/sites/${siteId}/lists/${listId}/items/${id}/fields`, fields);
     toast('Abgemeldet & geschlossen ✓','success'); await loadItems(); }
   catch(e){ toast('Fehler: '+e.message,'error'); }
 }

@@ -39,7 +39,7 @@ Falls der Name abweicht: `SP_SITE` in `app.js` und in den Workflow-Variablen anp
 | Spalte (Anzeige) | Typ | Hinweis |
 |---|---|---|
 | `Title` | Einzeltext | wird als **Besuchername** verwendet (Anzeige „Besucher") |
-| `Werk` | Auswahl | DIHAG, DSO, EIS, EMH, EWA, Kein, Kernwerk, LEG, MEG, OZB, SCH, SHB, WGC, ZAI |
+| `Werk` | Auswahl | DIHAG, DSO, EIS, EWA, LEG, MEG, SCH, SHB, WGC, ZAI |
 | `Bereich` | Einzeltext | |
 | `AnsprechpartnerName` | Einzeltext | Gastgeber |
 | `AnsprechpartnerTelefon` | Einzeltext | |
