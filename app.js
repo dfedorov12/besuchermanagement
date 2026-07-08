@@ -113,9 +113,13 @@ const FIELD_DEFS = [
 ];
 
 async function discoverSP(){
-  const site = await gGet(`/sites/${SP_SITE}`);
+  let site;
+  try { site = await gGet(`/sites/${SP_SITE}`); }
+  catch(e){ if(/404|itemNotFound|could not be found/i.test(e.message)) throw new Error('SITE_NOT_FOUND'); throw e; }
   siteId = site.id;
-  const list = await gGet(`/sites/${siteId}/lists/${encodeURIComponent(SP_LIST)}?$select=id,displayName`);
+  let list;
+  try { list = await gGet(`/sites/${siteId}/lists/${encodeURIComponent(SP_LIST)}?$select=id,displayName`); }
+  catch(e){ if(/404|itemNotFound|could not be found/i.test(e.message)) throw new Error('LIST_NOT_FOUND'); throw e; }
   listId = list.id;
   const cols = await gGet(`/sites/${siteId}/lists/${listId}/columns?$select=name,displayName`);
   const byName = new Map(), byDisp = new Map();
@@ -707,8 +711,21 @@ async function boot(){
   }catch(e){
     console.error(e);
     $id('boot-spinner').style.display='none';
-    bootErr('Fehler beim Start: '+e.message);
-    $id('boot-btn').style.display='inline-block';
+    const host = SP_SITE.split(':/')[0], path = SP_SITE.split(':/')[1];
+    const siteUrl = `https://${host}/${path}`;
+    const eb = $id('boot-err');
+    if (e.message==='SITE_NOT_FOUND'){
+      eb.innerHTML = `SharePoint-Site nicht gefunden:<br><b>${esc(siteUrl)}</b><br><br>`+
+        `Bitte die Site anlegen (SETUP.md §2) – oder, falls sie unter einem anderen Namen existiert, `+
+        `<code>SP_SITE</code> in <code>app.js</code> auf den echten Pfad anpassen.`;
+    } else if (e.message==='LIST_NOT_FOUND'){
+      eb.innerHTML = `Site gefunden, aber die Liste <b>„${esc(SP_LIST)}"</b> fehlt.<br>`+
+        `Bitte die Liste in der Site anlegen (SETUP.md §2).`;
+    } else {
+      eb.textContent = 'Fehler beim Start: '+e.message;
+    }
+    const btn = $id('boot-btn');
+    btn.style.display='inline-block'; btn.textContent='Erneut versuchen'; btn.onclick=()=>location.reload();
   }
 }
 boot();
