@@ -1,0 +1,29 @@
+name: Aufbewahrung (Auto-Löschung 90 Tage)
+
+on:
+  schedule:
+    # Täglich 03:00 UTC
+    - cron: '0 3 * * *'
+  workflow_dispatch: {}   # Manuell auslösbar (Actions → Run workflow)
+
+concurrency:
+  group: retention
+  cancel-in-progress: false
+
+jobs:
+  retention:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Alte Besucher-Datensätze löschen
+        run: node scripts/retention.mjs
+        env:
+          TENANT_ID:      ${{ secrets.TENANT_ID }}
+          CLIENT_ID:      ${{ secrets.CLIENT_ID }}
+          CLIENT_SECRET:  ${{ secrets.CLIENT_SECRET }}
+          SP_SITE:        ${{ vars.SP_SITE }}
+          SP_LIST:        ${{ vars.SP_LIST }}
+          RETENTION_DAYS: '90'

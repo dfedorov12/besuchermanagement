@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <meta http-equiv="Cache-Control" content="no-cache,no-store,must-revalidate"/>
+  <title>DIHAG · Besuchermanagement</title>
+  <!-- Compliance: keine Google-Fonts (kein Dritt-CDN mit PII-Bezug). System-Font-Fallback via style.css. -->
+  <!-- MSAL vom Microsoft-CDN (bestehender M365-Auftragsverarbeiter) -->
+  <script src="https://alcdn.msauth.net/browser/2.38.2/js/msal-browser.min.js"></script>
+  <link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+
+<!-- ── BOOT ─────────────────────────────────────────────────────── -->
+<div id="boot">
+  <div class="boot-logo">
+    <svg width="40" height="40" viewBox="0 0 40 40"><rect width="40" height="40" rx="10" fill="#1a56db"/><text x="7" y="28" font-size="22" font-weight="700" fill="white">D</text></svg>
+  </div>
+  <div class="boot-title">DIHAG Besuchermanagement</div>
+  <div class="boot-sub" id="boot-sub">Anmeldung läuft…</div>
+  <div class="boot-spinner" id="boot-spinner"></div>
+  <div class="boot-err" id="boot-err"></div>
+  <button class="boot-btn" id="boot-btn" onclick="doLogin()" style="display:none">Anmelden</button>
+</div>
+
+<!-- ── APP ──────────────────────────────────────────────────────── -->
+<div id="app" style="display:none">
+
+  <!-- Sidebar -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-logo">
+      <svg width="26" height="26" viewBox="0 0 26 26"><rect width="26" height="26" rx="6" fill="#1a56db"/><text x="5" y="19" font-size="13" font-weight="700" fill="white">D</text></svg>
+      <span>DIHAG</span>
+    </div>
+    <nav class="sidebar-nav">
+      <a href="#" class="nav-item" data-view="dashboard">
+        <svg viewBox="0 0 20 20" fill="currentColor"><path d="M2 4a2 2 0 012-2h4a2 2 0 012 2v4a2 2 0 01-2 2H4a2 2 0 01-2-2V4zm10 0a2 2 0 012-2h4a2 2 0 012 2v4a2 2 0 01-2 2h-4a2 2 0 01-2-2V4zM2 14a2 2 0 012-2h4a2 2 0 012 2v4a2 2 0 01-2 2H4a2 2 0 01-2-2v-4zm10 0a2 2 0 012-2h4a2 2 0 012 2v4a2 2 0 01-2 2h-4a2 2 0 01-2-2v-4z"/></svg>
+        Dashboard
+      </a>
+      <a href="#" class="nav-item" data-view="new">
+        <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd"/></svg>
+        Neue Anmeldung
+      </a>
+      <a href="#" class="nav-item" data-view="checkin">
+        <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+        Empfang / Check-in
+      </a>
+      <a href="#" class="nav-item" data-view="records">
+        <svg viewBox="0 0 20 20" fill="currentColor"><path d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z"/></svg>
+        Datensätze
+      </a>
+      <a href="#" class="nav-item" data-view="reports">
+        <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v14a1 1 0 01-1 1H4a1 1 0 01-1-1V3zm3 3a1 1 0 000 2h.01a1 1 0 100-2H6zm3 0a1 1 0 000 2h4a1 1 0 100-2H9zm-3 4a1 1 0 100 2h.01a1 1 0 100-2H6zm3 0a1 1 0 100 2h4a1 1 0 100-2H9zm-3 4a1 1 0 100 2h.01a1 1 0 100-2H6zm3 0a1 1 0 100 2h4a1 1 0 100-2H9z" clip-rule="evenodd"/></svg>
+        Reports
+      </a>
+    </nav>
+    <div class="sidebar-user">
+      <div class="user-avatar" id="hdr-av">?</div>
+      <div class="user-info">
+        <div class="user-name" id="hdr-name">–</div>
+        <div class="user-sub" id="hdr-mail">–</div>
+      </div>
+      <button class="logout-btn" title="Abmelden" onclick="doLogout()">
+        <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 3a1 1 0 00-1 1v12a1 1 0 102 0V4a1 1 0 00-1-1zm10.293 9.293a1 1 0 001.414 1.414l3-3a1 1 0 000-1.414l-3-3a1 1 0 10-1.414 1.414L14.586 9H7a1 1 0 100 2h7.586l-1.293 1.293z" clip-rule="evenodd"/></svg>
+      </button>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="main">
+    <header class="topbar">
+      <div class="topbar-left">
+        <button class="menu-toggle" id="menu-toggle">
+          <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 5a1 1 0 011-1h6a1 1 0 110 2H4a1 1 0 01-1-1z" clip-rule="evenodd"/></svg>
+        </button>
+        <h1 class="topbar-title" id="page-title">Dashboard</h1>
+      </div>
+      <div class="topbar-right">
+        <span class="role-badge" id="hdr-role" style="display:none"></span>
+        <button class="btn btn-sm btn-ghost" onclick="loadItems(true)" title="Aktualisieren" id="btn-reload">Aktualisieren</button>
+        <button class="btn btn-sm btn-ghost" onclick="openSettings()" title="Einstellungen">⚙️</button>
+      </div>
+    </header>
+
+    <div id="col-warning" class="col-warning" style="display:none"></div>
+
+    <div class="content" id="content">
+
+      <!-- DASHBOARD -->
+      <div id="view-dashboard" class="view">
+        <div id="dash-stats" class="stat-grid"></div>
+        <div class="view-toolbar">
+          <div class="search-box">
+            <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd"/></svg>
+            <input type="text" id="search-dashboard" placeholder="Anwesende suchen …" oninput="renderDashboard()"/>
+          </div>
+        </div>
+        <h3 class="section-h">Aktuell anwesend</h3>
+        <div id="dash-onsite"></div>
+      </div>
+
+      <!-- NEUE ANMELDUNG -->
+      <div id="view-new" class="view"></div>
+
+      <!-- EMPFANG / CHECK-IN -->
+      <div id="view-checkin" class="view">
+        <div class="view-toolbar">
+          <div class="search-box">
+            <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd"/></svg>
+            <input type="text" id="search-checkin" placeholder="Suchen …" oninput="renderCheckin()"/>
+          </div>
+        </div>
+        <div id="checkin-body"></div>
+      </div>
+
+      <!-- DATENSÄTZE -->
+      <div id="view-records" class="view">
+        <div class="view-toolbar">
+          <div class="search-box">
+            <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd"/></svg>
+            <input type="text" id="search-records" placeholder="Name, Firma, Werk …" oninput="renderRecords()"/>
+          </div>
+          <select id="filter-status" class="sort-select" onchange="renderRecords()">
+            <option value="">Alle Status</option>
+            <option value="Angemeldet">Angemeldet</option>
+            <option value="Eingecheckt">Eingecheckt</option>
+            <option value="Geschlossen">Geschlossen</option>
+          </select>
+        </div>
+        <div id="records-body"></div>
+      </div>
+
+      <!-- REPORTS -->
+      <div id="view-reports" class="view">
+        <div id="reports-body"></div>
+      </div>
+
+      <!-- DETAIL -->
+      <div id="view-detail" class="view">
+        <button class="btn btn-ghost back-btn" onclick="navigate('records')">← Zurück</button>
+        <div id="detail-content"></div>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+<!-- Einstellungen -->
+<div id="settings-modal" class="modal-overlay hidden" onclick="if(event.target===this)closeSettings()">
+  <div class="modal" style="max-width:640px">
+    <div class="modal-header">
+      <h3>Einstellungen</h3>
+      <button class="modal-close" onclick="closeSettings()">×</button>
+    </div>
+    <div class="modal-body" id="settings-body"></div>
+  </div>
+</div>
+
+<!-- Generisches Modal -->
+<div id="modal-overlay" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="modal-title"></h3>
+      <button class="modal-close" onclick="closeModal()">×</button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+    <div class="modal-footer" id="modal-footer"></div>
+  </div>
+</div>
+
+<div id="toast-c"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
