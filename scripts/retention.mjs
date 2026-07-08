@@ -8,7 +8,7 @@
 const TENANT_ID = process.env.TENANT_ID;
 const CLIENT_ID = process.env.CLIENT_ID;
 const CLIENT_SECRET = process.env.CLIENT_SECRET;
-const SP_SITE = process.env.SP_SITE || 'dihag.sharepoint.com:/sites/besuchermanagement';
+const SP_SITE = process.env.SP_SITE || 'dihag.sharepoint.com:/sites/IT';
 const SP_LIST = process.env.SP_LIST || 'Besucheranmeldung';
 const RETENTION_DAYS = parseInt(process.env.RETENTION_DAYS || '90', 10);
 const API = 'https://graph.microsoft.com/v1.0';

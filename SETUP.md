@@ -22,12 +22,16 @@ Statische SPA (GitHub Pages) · MSAL-Login · SharePoint-Liste als Backend · Zu
 > Hinweis Datensparsamkeit: Im delegierten Flow ist der Zugriff durch die **SharePoint-Berechtigungen des
 > angemeldeten Nutzers** begrenzt. Die restriktive Berechtigung der Site/Liste ist daher die eigentliche Datengrenze.
 
-## 2. SharePoint – dedizierte Site + Listen
+## 2. SharePoint – Site + Listen
 
-Neue (Team-)Site, z. B. `https://dihag.sharepoint.com/sites/besuchermanagement`.
+Aktuell konfiguriert: **`https://dihag.sharepoint.com/sites/IT`** (`SP_SITE = 'dihag.sharepoint.com:/sites/IT'`).
 Falls der Name abweicht: `SP_SITE` in `app.js` und in den Workflow-Variablen anpassen.
 
-Berechtige nur den benötigten Personenkreis auf der Site (Empfang/Wachschutz, Sekretariat, verantwortliche Bereiche).
+> **Datenschutz-Hinweis:** Die Besucher-PII liegt damit in der IT-Site. Wer Zugriff auf diese Site hat, kann
+> die Datensätze grundsätzlich sehen. Daher entweder den Site-Zugriff eng halten **oder** die Listen per
+> „Listen-Berechtigungen" (Vererbung unterbrechen) auf den Besucher-Personenkreis beschränken
+> (Empfang/Wachschutz, Sekretariat, verantwortliche Bereiche). Eine dedizierte Site bleibt die sauberere Variante.
+
 **Versionsverlauf der Liste aktiviert lassen** (Prüfbarkeit).
 
 ### Liste `Besucheranmeldung`
@@ -84,7 +88,7 @@ Benötigt **app-only**-Zugang (getrennt vom SPA-Login):
 1. In derselben App-Registrierung ein **Client-Secret** anlegen.
 2. **Application**-Berechtigung `Sites.ReadWrite.All` (oder `Sites.Selected` nur auf diese Site) + Adminzustimmung.
 3. GitHub **Secrets**: `TENANT_ID`, `CLIENT_ID`, `CLIENT_SECRET`.
-4. GitHub **Variables**: `SP_SITE` (= `dihag.sharepoint.com:/sites/besuchermanagement`), `SP_LIST` (= `Besucheranmeldung`).
+4. GitHub **Variables**: `SP_SITE` (= `dihag.sharepoint.com:/sites/IT`), `SP_LIST` (= `Besucheranmeldung`).
 5. Frist über `RETENTION_DAYS` im Workflow anpassbar.
 
 Alternativ/ergänzend: SharePoint-**Aufbewahrungslabel** (Retention Policy) auf der Liste.

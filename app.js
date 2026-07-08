@@ -12,8 +12,8 @@
 const CLIENT_ID = '674a4aed-2a41-4c31-9d3f-ded1a1377afa';
 const TENANT_ID = 'fdb70646-023a-403b-a4b9-1f474a935123';
 const SCOPES    = ['User.Read', 'Sites.ReadWrite.All'];
-// Dedizierte SharePoint-Site (bei abweichendem Namen hier anpassen):
-const SP_SITE   = 'dihag.sharepoint.com:/sites/besuchermanagement';
+// SharePoint-Site mit den Listen (bei abweichendem Namen hier anpassen):
+const SP_SITE   = 'dihag.sharepoint.com:/sites/IT';
 const SP_LIST   = 'Besucheranmeldung';
 const ACCESS_LIST_NAME  = 'BESU_Konfiguration';
 const ACCESS_ITEM_TITLE = 'access';
