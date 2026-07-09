@@ -11,8 +11,13 @@ Statische SPA (GitHub Pages) · MSAL-Login · SharePoint-Liste als Backend · Zu
 - **Client-ID:** `674a4aed-2a41-4c31-9d3f-ded1a1377afa`
 - **Tenant:** `fdb70646-023a-403b-a4b9-1f474a935123` (Single-Tenant)
 
-**API-Berechtigungen → Microsoft Graph → Delegiert:** `User.Read`, `Sites.ReadWrite.All`
+**API-Berechtigungen → Microsoft Graph → Delegiert:** `User.Read`, `Sites.ReadWrite.All`, `Mail.Send`
 → danach **Administratorzustimmung erteilen**.
+
+`Mail.Send` wird für die **Einladungs-E-Mails** genutzt (Versand über `/me/sendMail` = das Konto des
+angemeldeten Nutzers, kein Outlook nötig). Es wird **inkrementell** angefragt: Beim ersten Versand erscheint
+einmalig ein Zustimmungs-Popup. Ist Admin-Zustimmung im Tenant Pflicht, hier vorab per „Administratorzustimmung
+erteilen" freigeben. Popups für die App-Domain im Browser erlauben.
 
 **Authentifizierung → Plattform → Single-Page-Application (SPA):**
 - `https://dfedorov12.github.io/besuchermanagement/`

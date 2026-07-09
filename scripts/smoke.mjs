@@ -26,6 +26,7 @@ const COLS = ['Title','Werk','Bereich','AnsprechpartnerName','AnsprechpartnerTel
 const COLSET = new Set(COLS);
 
 const posts = [];           // erfasste POST-Bodies (fields)
+const sentMail = [];        // erfasste /me/sendMail-Bodies
 let sentUnknownColumn = false;
 
 function resp(data, status = 200) {
@@ -38,6 +39,7 @@ async function fakeFetch(url, opts) {
   const method = (opts && opts.method) || 'GET';
   const u = String(url);
 
+  if (method === 'POST' && u.includes('/me/sendMail')) { sentMail.push(JSON.parse(opts.body || '{}')); return resp({}, 202); }
   if (method === 'POST' && u.includes('/lists/listid/items')) {
     const body = JSON.parse(opts.body || '{}');
     const fields = body.fields || {};
@@ -95,7 +97,7 @@ async function main() {
 
   // app.js in der Fensterrealität ausführen + Test-Handles exportieren
   let src = readFileSync(join(root, 'app.js'), 'utf8');
-  src += `\n;window.__app = { submitNew, navigate, applyTemplate, get HAVE(){return HAVE}, get C(){return C}, WERKE, get account(){return account}, isFull, canSeeDashboard, canSeeReports, isMine };`;
+  src += `\n;window.__app = { submitNew, navigate, applyTemplate, sendSavedInvite, get HAVE(){return HAVE}, get C(){return C}, WERKE, get account(){return account}, isFull, canSeeDashboard, canSeeReports, isMine };`;
   w.eval(src);
 
   // Auf Boot warten (discoverSP füllt HAVE)
@@ -147,6 +149,13 @@ async function main() {
   ok(Array.isArray(f.Besuchszweck) && f.Besuchszweck.join(',') === 'Audit', 'Besuchszweck als Array gesendet');
   ok(f['Besuchszweck@odata.type'] === 'Collection(Edm.String)', 'Multi-Choice Besuchszweck mit @odata.type annotiert');
   ok(f['PSA@odata.type'] === 'Collection(Edm.String)', 'Multi-Choice PSA mit @odata.type annotiert');
+
+  // Einladung per Microsoft Graph (kein Outlook/mailto)
+  await w.__app.sendSavedInvite(0);
+  await sleep(5);
+  ok(sentMail.length === 1, 'Einladung per Graph /me/sendMail gesendet');
+  ok(sentMail[0]?.message?.toRecipients?.[0]?.emailAddress?.address === 'max@acme.example', 'Einladung an richtige Adresse');
+  ok((sentMail[0]?.message?.subject||'').includes('Einladung'), 'Einladungs-Betreff gesetzt');
 
   // Rollen & Sichtbarkeit (Admin ist vollberechtigt)
   ok(w.__app.isFull(), 'Admin ist vollberechtigt');

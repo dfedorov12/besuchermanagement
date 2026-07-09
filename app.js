@@ -12,6 +12,7 @@
 const CLIENT_ID = '674a4aed-2a41-4c31-9d3f-ded1a1377afa';
 const TENANT_ID = 'fdb70646-023a-403b-a4b9-1f474a935123';
 const SCOPES    = ['User.Read', 'Sites.ReadWrite.All'];
+const MAIL_SCOPES = ['Mail.Send'];   // inkrementell – erst beim ersten E-Mail-Versand angefragt
 // SharePoint-Site mit den Listen (bei abweichendem Namen hier anpassen):
 const SP_SITE   = 'dihag.sharepoint.com:/sites/IT';
 const SP_LIST   = 'Besucheranmeldung';
@@ -45,6 +46,7 @@ let _meIds = null;
 let currentView = 'dashboard';
 let newVisitorSeq = 0;
 let templateItem = null;   // Datensatz, dessen Werte in „Neue Anmeldung" vorbefüllt werden
+let lastSaved = null;      // zuletzt gespeicherte Anmeldung (für Einladungs-Versand)
 
 // ── DOM-HELFER ──────────────────────────────────────────────────────────────
 const $id = id => document.getElementById(id);
@@ -646,7 +648,7 @@ function showDiagModal(bad, fatal){
   $id('modal-overlay').classList.remove('hidden');
 }
 
-// ── EINLADUNG PER E-MAIL (mailto – ohne Zusatzberechtigung) ──────────────────
+// ── EINLADUNG PER E-MAIL (Microsoft Graph /me/sendMail) ──────────────────────
 function inviteBody(head, v){
   const L = [];
   L.push(`Guten Tag ${v.name},`);
@@ -666,28 +668,59 @@ function inviteBody(head, v){
   L.push(head.ansprech);
   return L.join('\r\n');
 }
-function inviteMailto(head, v){
-  const subject = `Einladung zum Besuch bei DIHAG – ${new Date(head.datum+'T00:00:00').toLocaleDateString('de-DE')}`;
-  const href = `mailto:${encodeURIComponent(v.email||'')}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(inviteBody(head,v))}`;
-  window.location.href = href;
+// Token für Mail.Send inkrementell holen (getrennt vom Login – gefährdet dieses nicht).
+async function getMailToken(){
+  try{ return (await msalApp.acquireTokenSilent({ scopes: MAIL_SCOPES, account })).accessToken; }
+  catch(e){
+    try{ return (await msalApp.acquireTokenPopup({ scopes: MAIL_SCOPES, account })).accessToken; }
+    catch(e2){ throw new Error('Berechtigung „E-Mail senden" (Mail.Send) wurde nicht erteilt.'); }
+  }
 }
+// Sendet die Einladung direkt über das Konto des angemeldeten Nutzers (kein Outlook nötig).
+async function sendMailInvite(head, v){
+  if(!v.email){ toast('Für diesen Besucher ist keine E-Mail hinterlegt.','error'); return false; }
+  try{
+    toast('Sende Einladung an '+v.email+' …','info');
+    const token = await getMailToken();
+    const subject = `Einladung zum Besuch bei DIHAG – ${new Date(head.datum+'T00:00:00').toLocaleDateString('de-DE')}`;
+    const payload = { message:{ subject, body:{ contentType:'Text', content: inviteBody(head, v) },
+      toRecipients:[{ emailAddress:{ address: v.email } }] }, saveToSentItems:true };
+    const r = await fetch(`${API}/me/sendMail`, { method:'POST',
+      headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify(payload) });
+    if(!r.ok){ const t=await r.text(); throw new Error(r.status+' '+t.slice(0,200)); }
+    toast('Einladung an '+v.email+' gesendet ✓','success');
+    return true;
+  }catch(e){ toast('E-Mail nicht gesendet: '+e.message,'error'); return false; }
+}
+function inviteHeadFromItem(i){ return { werk:i.werk, bereich:i.bereich, ansprech:i.ansprechName, datum:(i.besuchsdatum||'').slice(0,10), firma:i.firma, zweck:i.zweck }; }
+async function sendInviteForItem(id){
+  const i = ITEMS.find(x=>x.id===id);
+  if(!i){ toast('Datensatz nicht gefunden.','error'); return; }
+  await sendMailInvite(inviteHeadFromItem(i), { name:i.besucherName, email:i.email });
+}
+
 function showPostSaveModal(head, visitors){
+  lastSaved = { head, visitors };
   $id('modal-title').textContent = 'Anmeldung gespeichert';
   const rows = visitors.map((v,i)=>`
     <div class="visitor-card" style="margin-bottom:8px">
       <div class="vc-main"><div class="vc-name">${esc(v.name)}</div>
         <div class="vc-sub">${v.email?esc(v.email):'<span style="color:#b45309">keine E-Mail hinterlegt</span>'}</div></div>
       <div class="vc-actions">${v.email
-        ? `<button class="btn btn-sm btn-primary" onclick='inviteMailto(${JSON.stringify(head).replace(/'/g,"&#39;")}, ${JSON.stringify(v).replace(/'/g,"&#39;")})'>✉ Einladung</button>`
+        ? `<button class="btn btn-sm btn-primary" onclick="sendSavedInvite(${i})">✉ Einladung senden</button>`
         : ''}</div>
     </div>`).join('');
+  const anyEmail = visitors.some(v=>v.email);
   $id('modal-body').innerHTML = `
-    <p style="font-size:.86rem;color:#374151;margin-bottom:10px">Einladungs-E-Mail an die Besucher senden (öffnet dein Outlook mit vorbereitetem Text inkl. Sicherheitshinweis):</p>
+    <p style="font-size:.86rem;color:#374151;margin-bottom:10px">Einladungs-E-Mail <b>direkt aus der App</b> senden (über dein Konto, kein Outlook nötig):</p>
     ${rows}
-    <p class="dsgvo-hint" style="margin-top:8px">Die digitale Unterschrift zur Sicherheitsunterweisung erfolgt beim Check-in am Empfang. Ein vorheriges digitales Signieren durch externe Besucher ist als Ausbaustufe möglich (separater Signatur-Link).</p>`;
-  $id('modal-footer').innerHTML = `<button class="btn btn-primary" onclick="closeModal();navigate('checkin')">Weiter zum Empfang</button>`;
+    <p class="dsgvo-hint" style="margin-top:8px">Beim ersten Versand fragt Microsoft einmalig nach der Berechtigung „E-Mail senden". Die Unterschrift zur Sicherheitsunterweisung erfolgt beim Check-in am Empfang.</p>`;
+  const allBtn = (visitors.length>1 && anyEmail) ? `<button class="btn btn-ghost" onclick="sendAllSavedInvites()">Alle einladen</button>` : '';
+  $id('modal-footer').innerHTML = `${allBtn}<button class="btn btn-primary" onclick="closeModal();navigate('checkin')">Weiter zum Empfang</button>`;
   $id('modal-overlay').classList.remove('hidden');
 }
+async function sendSavedInvite(idx){ if(lastSaved) await sendMailInvite(lastSaved.head, lastSaved.visitors[idx]); }
+async function sendAllSavedInvites(){ if(!lastSaved) return; for(const v of lastSaved.visitors){ if(v.email) await sendMailInvite(lastSaved.head, v); } }
 
 // ── CHECK-IN / CHECK-OUT ────────────────────────────────────────────────────
 async function checkIn(id){
@@ -762,10 +795,11 @@ function renderDetail(id){
       : (i.status==='Eingecheckt' ? `<button class="btn btn-sm btn-outline" onclick="checkOut('${i.id}')">Abmelden</button>` : '')) : '';
   const del = isAdmin() ? `<button class="btn btn-sm btn-danger" onclick="deleteItem('${i.id}')">Löschen</button>` : '';
   const tmpl = canCreate() ? `<button class="btn btn-sm btn-outline" onclick="useAsTemplate('${i.id}')">Als Vorlage</button>` : '';
+  const invite = (canCreate() && i.email) ? `<button class="btn btn-sm btn-primary" onclick="sendInviteForItem('${i.id}')">✉ Einladung</button>` : '';
   const spUrl = `https://${SP_SITE.split(':/')[0]}/${SP_SITE.split(':/')[1]}/Lists/${encodeURIComponent(SP_LIST)}/AllItems.aspx`;
   host.innerHTML = `
     <div class="detail-head"><h2>${esc(i.besucherName)}</h2> ${werkBadge(i.werk)} ${statusBadge(i.status)}</div>
-    <div class="card-actions" style="margin-top:4px">${stamp} ${tmpl} ${del}
+    <div class="card-actions" style="margin-top:4px">${stamp} ${invite} ${tmpl} ${del}
       <a class="btn btn-sm btn-ghost" href="${spUrl}" target="_blank" rel="noopener">Versionsverlauf in SharePoint</a></div>
     <div class="detail-grid">
       ${row('Firma', esc(i.firma||'–'))}
