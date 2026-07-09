@@ -18,7 +18,7 @@ const SP_LIST   = 'Besucheranmeldung';
 const ACCESS_LIST_NAME  = 'BESU_Konfiguration';
 const ACCESS_ITEM_TITLE = 'access';
 // Admins: sehen alle Werke, dürfen Zugriffsrechte pflegen und löschen.
-const ADMIN_EMAILS = ['administrator@dihag.com', 'fedorov@dihag.com'];
+const ADMIN_EMAILS = ['administrator@dihag.com'];
 const API = 'https://graph.microsoft.com/v1.0';
 
 // Werke (Reihenfolge = Anzeige). Steuert den Zugriff.
@@ -44,6 +44,7 @@ let accessUsers = {};       // { upn: { role, werke:[] } }
 let _meIds = null;
 let currentView = 'dashboard';
 let newVisitorSeq = 0;
+let templateItem = null;   // Datensatz, dessen Werte in „Neue Anmeldung" vorbefüllt werden
 
 // ── DOM-HELFER ──────────────────────────────────────────────────────────────
 const $id = id => document.getElementById(id);
@@ -365,7 +366,7 @@ function recordCard(i){
       <div class="vc-name">${esc(i.besucherName)} ${werkBadge(i.werk)} ${statusBadge(i.status)}</div>
       <div class="vc-sub">${esc(i.firma||'–')} · ${esc(i.bereich||'')} · ${fmtDate(i.besuchsdatum)} · Ein ${fmtTime(i.eingang)} / Ab ${fmtTime(i.abgang)}</div>
     </div>
-    <div class="vc-actions">${stamp}<span class="mini-btn">Öffnen →</span></div>
+    <div class="vc-actions">${stamp}${canCreate()?`<button class="mini-btn" onclick="event.stopPropagation();useAsTemplate('${i.id}')">Vorlage</button>`:''}<span class="mini-btn">Öffnen →</span></div>
   </div>`;
 }
 
@@ -415,12 +416,43 @@ function renderNewForm(){
 
     <div class="card-actions">
       <button class="btn btn-primary" onclick="submitNew()">Anmeldung speichern</button>
-      <button class="btn btn-ghost" onclick="navigate('dashboard')">Abbrechen</button>
+      <button class="btn btn-ghost" onclick="goHome()">Abbrechen</button>
     </div>
   </div>`;
   addVisitorRow(true);
   setupSignature();
   $id('f-shb').addEventListener('change', e=>{ $id('sig-block').style.display = e.target.checked ? 'block' : 'none'; });
+  if (templateItem){ applyTemplate(templateItem); templateItem = null; }
+}
+function goHome(){ navigate(canSeeDashboard() ? 'dashboard' : 'records'); }
+
+// „Als Vorlage": bestehenden Datensatz als Basis für eine neue Anmeldung nutzen.
+function useAsTemplate(id){
+  const it = ITEMS.find(x=>x.id===id);
+  if(!it){ toast('Datensatz nicht gefunden.','error'); return; }
+  if(!canCreate()){ toast('Keine Berechtigung zum Anlegen.','error'); return; }
+  templateItem = it;
+  navigate('new');
+}
+function applyTemplate(it){
+  const setv=(id,v)=>{ const el=$id(id); if(el&&v) el.value=v; };
+  if(allowedWerke().includes(it.werk)) setv('f-werk', it.werk);
+  setv('f-bereich', it.bereich);
+  setv('f-ansprech', it.ansprechName);
+  setv('f-ansprechtel', it.ansprechTel);
+  setv('f-firma', it.firma);
+  (it.zweck||[]).forEach(z=>{ const cb=document.querySelector(`input[name="zweck"][value="${z}"]`); if(cb) cb.checked=true; });
+  const row = document.querySelector('#visitors .visitor-row');
+  if(row){
+    const sv=(sel,v)=>{ const el=row.querySelector(sel); if(el&&v) el.value=v; };
+    sv('[data-f="name"]', it.besucherName);
+    sv('[data-f="funktion"]', it.funktion);
+    sv('[data-f="tel"]', it.tel);
+    sv('[data-f="email"]', it.email);
+    sv('[data-f="kennzeichen"]', it.kennzeichen);
+    (it.psa||[]).forEach(p=>{ const cb=row.querySelector(`[data-psa][value="${p}"]`); if(cb) cb.checked=true; });
+  }
+  toast('Aus Vorlage übernommen – Datum prüfen und neu unterschreiben.','info');
 }
 function addVisitorRow(first){
   const seq = ++newVisitorSeq;
@@ -718,10 +750,11 @@ function renderDetail(id){
       ? `<button class="btn btn-sm btn-success" onclick="checkIn('${i.id}')">Einchecken</button>`
       : (i.status==='Eingecheckt' ? `<button class="btn btn-sm btn-outline" onclick="checkOut('${i.id}')">Abmelden</button>` : '')) : '';
   const del = isAdmin() ? `<button class="btn btn-sm btn-danger" onclick="deleteItem('${i.id}')">Löschen</button>` : '';
+  const tmpl = canCreate() ? `<button class="btn btn-sm btn-outline" onclick="useAsTemplate('${i.id}')">Als Vorlage</button>` : '';
   const spUrl = `https://${SP_SITE.split(':/')[0]}/${SP_SITE.split(':/')[1]}/Lists/${encodeURIComponent(SP_LIST)}/AllItems.aspx`;
   host.innerHTML = `
     <div class="detail-head"><h2>${esc(i.besucherName)}</h2> ${werkBadge(i.werk)} ${statusBadge(i.status)}</div>
-    <div class="card-actions" style="margin-top:4px">${stamp} ${del}
+    <div class="card-actions" style="margin-top:4px">${stamp} ${tmpl} ${del}
       <a class="btn btn-sm btn-ghost" href="${spUrl}" target="_blank" rel="noopener">Versionsverlauf in SharePoint</a></div>
     <div class="detail-grid">
       ${row('Firma', esc(i.firma||'–'))}
@@ -774,6 +807,37 @@ function openSettings(){
     </div>
     <button class="btn btn-sm btn-ghost" onclick="showPrivacyNotice()">🔒 Datenschutzhinweis (Aushang Empfang)</button>`;
 
+  // ── Rechtemodell (Illustration, für alle sichtbar) ──
+  const currentKey = isAdmin() ? 'admin' : role;
+  const rr = (key, name, caps) => {
+    const active = key === currentKey;
+    const cells = caps.map(c=>`<td style="padding:5px 8px;text-align:center">${c?'✅':'–'}</td>`).join('');
+    return `<tr style="${active?'background:#eff6ff;font-weight:600':''}"><td style="padding:5px 8px;white-space:nowrap">${esc(name)}${active?' ◀ Du':''}</td>${cells}</tr>`;
+  };
+  const rechteBlock = `
+    <hr class="modal-hr">
+    <div class="settings-section-title">🧭 Rechtemodell</div>
+    <div style="overflow-x:auto">
+      <table style="border-collapse:collapse;font-size:.76rem;width:100%;min-width:520px">
+        <thead><tr style="color:#6b7280;border-bottom:1px solid #e5e7eb">
+          <th style="padding:5px 8px;text-align:left">Rolle</th>
+          <th style="padding:5px 8px">Anlegen</th>
+          <th style="padding:5px 8px">Ein-/Aus&shy;checken</th>
+          <th style="padding:5px 8px">Eigene Datens&auml;tze</th>
+          <th style="padding:5px 8px">Dashboard (alle)</th>
+          <th style="padding:5px 8px">Reports</th>
+          <th style="padding:5px 8px">Rechte&shy;verwaltung</th>
+        </tr></thead>
+        <tbody>
+          ${rr('verantwortlicher','SHB-Verantwortlicher',[1,1,1,0,0,0])}
+          ${rr('wachschutz','Wachschutz (voll)',[1,1,1,1,1,0])}
+          ${rr('sekretariat','Sekretariat (voll)',[1,1,1,1,1,0])}
+          ${rr('admin','Administrator',[1,1,1,1,1,1])}
+        </tbody>
+      </table>
+    </div>
+    <p class="dsgvo-hint" style="margin-top:6px">Zugriff zus&auml;tzlich je Werk begrenzt. „Eigene Datens&auml;tze" = nur selbst erstellte. Neue Nutzer starten als SHB-Verantwortlicher.</p>`;
+
   let adminBlock = '';
   if (canManageAccess()){
     const roleOpts = r => Object.entries(ROLLEN).map(([k,l])=>`<option value="${k}" ${r===k?'selected':''}>${esc(l)}</option>`).join('');
@@ -797,7 +861,7 @@ function openSettings(){
       </div>
       ${userBlocks}`;
   }
-  $id('settings-body').innerHTML = meBlock + adminBlock;
+  $id('settings-body').innerHTML = meBlock + rechteBlock + adminBlock;
   $id('settings-modal').classList.remove('hidden');
 }
 function closeSettings(){ $id('settings-modal').classList.add('hidden'); }

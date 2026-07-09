@@ -55,7 +55,7 @@ async function fakeFetch(url, opts) {
       if (!COLSET.has(k)) { sentUnknownColumn = true; return resp({ error:{ message:'bad' } }, 400); } }
     return resp({ id: 'patched' });
   }
-  if (u.includes('/me?$select')) return resp({ userPrincipalName:'fedorov@dihag.com', mail:'fedorov@dihag.com', otherMails:[], proxyAddresses:[] });
+  if (u.includes('/me?$select')) return resp({ userPrincipalName:'administrator@dihag.com', mail:'administrator@dihag.com', otherMails:[], proxyAddresses:[] });
   if (u.includes('dihag.sharepoint.com:/sites/IT') && !u.includes('/lists')) return resp({ id:'siteid' });
   if (u.includes('/lists/Besucheranmeldung')) return resp({ id:'listid', displayName:'Besucheranmeldung' });
   if (u.includes('/lists/listid/columns')) return resp({ value: COLS.map(n => ({ name:n, displayName:n })) });
@@ -69,7 +69,7 @@ class FakePCA {
   constructor(){}
   async initialize(){}
   async handleRedirectPromise(){ return null; }
-  getAllAccounts(){ return [{ username:'fedorov@dihag.com', name:'Denis Fedorov', idTokenClaims:{} }]; }
+  getAllAccounts(){ return [{ username:'administrator@dihag.com', name:'Administrator', idTokenClaims:{} }]; }
   async acquireTokenSilent(){ return { accessToken:'tkn' }; }
   async acquireTokenRedirect(){}
   async loginRedirect(){}
@@ -95,14 +95,14 @@ async function main() {
 
   // app.js in der Fensterrealität ausführen + Test-Handles exportieren
   let src = readFileSync(join(root, 'app.js'), 'utf8');
-  src += `\n;window.__app = { submitNew, navigate, get HAVE(){return HAVE}, get C(){return C}, WERKE, get account(){return account}, isFull, canSeeDashboard, canSeeReports, isMine };`;
+  src += `\n;window.__app = { submitNew, navigate, applyTemplate, get HAVE(){return HAVE}, get C(){return C}, WERKE, get account(){return account}, isFull, canSeeDashboard, canSeeReports, isMine };`;
   w.eval(src);
 
   // Auf Boot warten (discoverSP füllt HAVE)
   for (let i = 0; i < 60 && !(w.__app && w.__app.HAVE && w.__app.HAVE.size); i++) await sleep(50);
   const bootErr = w.document.getElementById('boot-err')?.textContent || '';
   ok(w.document.getElementById('app').style.display === '', 'App gestartet (Boot erfolgreich)' + (bootErr ? ' – boot-err: '+bootErr : ''));
-  ok(w.__app.account && w.__app.account.username === 'fedorov@dihag.com', 'Als Admin fedorov@dihag.com angemeldet');
+  ok(w.__app.account && w.__app.account.username === 'administrator@dihag.com', 'Als Admin administrator@dihag.com angemeldet');
 
   // Werke-Liste
   const WERKE = w.__app.WERKE;
@@ -155,8 +155,20 @@ async function main() {
   ok(doc.querySelector('.nav-item[data-view="dashboard"]').style.display !== 'none', 'Dashboard-Nav sichtbar (Admin)');
   ok(doc.querySelector('.nav-item[data-view="reports"]').style.display !== 'none', 'Reports-Nav sichtbar (Admin)');
   ok(doc.querySelector('.nav-item[data-view="records"]').textContent.includes('Eigene Datensätze'), 'Nav „Eigene Datensätze" umbenannt');
-  ok(w.__app.isMine({ createdByEmail:'fedorov@dihag.com' }) === true, 'Eigener Datensatz (E-Mail) erkannt');
+  ok(w.__app.isMine({ createdByEmail:'administrator@dihag.com' }) === true, 'Eigener Datensatz (E-Mail) erkannt');
   ok(w.__app.isMine({ createdByEmail:'fremd@dihag.com', createdBy:'Jemand' }) === false, 'Fremder Datensatz nicht als eigener erkannt');
+
+  // „Als Vorlage" – Formular aus einem Datensatz vorbefüllen
+  w.__app.navigate('new');
+  await sleep(10);
+  w.__app.applyTemplate({ werk:'DSO', bereich:'Tor 1', ansprechName:'Chef', ansprechTel:'', firma:'Beta AG',
+    zweck:['Audit'], besucherName:'Erika Beispiel', funktion:'', tel:'', email:'', kennzeichen:'', psa:['Warnweste'] });
+  ok(doc.getElementById('f-werk').value === 'DSO', 'Vorlage: Werk vorbefüllt');
+  ok(doc.getElementById('f-bereich').value === 'Tor 1', 'Vorlage: Bereich vorbefüllt');
+  ok(doc.getElementById('f-firma').value === 'Beta AG', 'Vorlage: Firma vorbefüllt');
+  ok(doc.querySelector('#visitors [data-f="name"]').value === 'Erika Beispiel', 'Vorlage: Besuchername vorbefüllt');
+  ok(doc.querySelector('input[name="zweck"][value="Audit"]').checked, 'Vorlage: Besuchszweck übernommen');
+  ok(doc.querySelector('#visitors [data-psa][value="Warnweste"]').checked, 'Vorlage: PSA übernommen');
 
   console.log(failures ? `\nFEHLGESCHLAGEN: ${failures} Prüfung(en)` : '\nALLE PRÜFUNGEN BESTANDEN');
   process.exit(failures ? 1 : 0);
