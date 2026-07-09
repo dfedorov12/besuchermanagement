@@ -1333,3 +1333,17 @@ details#attach-extra-wrap[open] .attach-more-toggle { color:#374151; }
 .stat-card.overdue .stat-num{color:#dc2626}
 .visitor-card.overdue{border-left:3px solid #dc2626}
 .warn-chip{display:inline-block;padding:2px 8px;border-radius:20px;font-size:.7rem;font-weight:600;background:#fee2e2;color:#b91c1c;margin-left:2px}
+
+/* ── Besuchermanagement: Anleitung (Hilfe-Reiter) ────────────────────────── */
+.form-card.help h2{margin-bottom:2px}
+.help-sec{padding:14px 0;border-top:1px solid #f1f5f9}
+.help-sec:first-of-type{border-top:none}
+.help-sec h3{font-size:.95rem;font-weight:700;color:#1e2939;margin-bottom:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.help-sec p{font-size:.86rem;color:#374151;line-height:1.55;margin:4px 0}
+.help-sec ul,.help-sec ol{font-size:.86rem;color:#374151;line-height:1.6;padding-left:20px;margin:4px 0}
+.help-sec li{margin-bottom:3px}
+.help-note{background:#f0f9ff;border-left:3px solid #38bdf8;border-radius:6px;padding:8px 12px;font-size:.82rem;color:#0c4a6e}
+.help-tag{font-size:.68rem;font-weight:600;padding:2px 8px;border-radius:20px;background:#f1f5f9;color:#64748b}
+.help-tag.ok{background:#dcfce7;color:#15803d}
+.link-btn{background:none;border:none;padding:0;color:#1a56db;font:inherit;font-size:inherit;cursor:pointer;text-decoration:underline}
+.link-btn:hover{color:#1648c5}

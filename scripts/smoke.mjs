@@ -173,6 +173,12 @@ async function main() {
   ok(w.__app.isOverdue({ status:'Eingecheckt', eingang:hAgo(1) }) === false, 'Nicht überfällig: 1 h anwesend');
   ok(w.__app.isOverdue({ status:'Geschlossen', eingang:hAgo(10) }) === false, 'Geschlossen ist nicht überfällig');
 
+  // Anleitung-Reiter
+  w.__app.navigate('anleitung');
+  await sleep(5);
+  ok(doc.querySelector('.nav-item[data-view="anleitung"]')?.textContent.includes('Anleitung'), 'Nav „Anleitung" vorhanden');
+  ok(doc.getElementById('anleitung-body').textContent.includes('Bedienungsanleitung'), 'Anleitung-Inhalt gerendert');
+
   // „Als Vorlage" – Formular aus einem Datensatz vorbefüllen
   w.__app.navigate('new');
   await sleep(10);

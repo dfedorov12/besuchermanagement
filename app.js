@@ -295,7 +295,7 @@ async function loadItems(force){
 }
 
 // ── NAVIGATION ──────────────────────────────────────────────────────────────
-const VIEW_TITLES = { dashboard:'Dashboard', new:'Neue Anmeldung', checkin:'Empfang / Check-in', records:'Eigene Datensätze', reports:'Reports', detail:'Details' };
+const VIEW_TITLES = { dashboard:'Dashboard', new:'Neue Anmeldung', checkin:'Empfang / Check-in', records:'Eigene Datensätze', reports:'Reports', anleitung:'Anleitung', detail:'Details' };
 function navigate(view, arg){
   // Zugriffsgrenzen für gesperrte Bereiche (Nav ist ohnehin ausgeblendet)
   if (view==='dashboard' && !canSeeDashboard()) view = 'new';
@@ -310,6 +310,7 @@ function navigate(view, arg){
   else if (view==='checkin') renderCheckin();
   else if (view==='records') renderRecords();
   else if (view==='reports') renderReports();
+  else if (view==='anleitung') renderAnleitung();
   else if (view==='detail') renderDetail(arg);
 }
 function renderCurrentView(){
@@ -846,6 +847,92 @@ function renderReports(){
       <div class="vc-sub">${s.ges} Datensätze (letzte 90 Tage) · aktuell anwesend: ${s.anwesend}</div></div></div>`).join('');
   body.innerHTML = `<h3 class="section-h">Übersicht nach Werk</h3>${rows||'<div class="empty-state">Keine Daten.</div>'}
     <div class="privacy-note" style="margin-top:16px">Reports zeigen nur aggregierte Zahlen deiner freigegebenen Werke. Aufbewahrung: 90 Tage, danach automatische Löschung.</div>`;
+}
+
+// ── ANLEITUNG (Hilfe-Reiter) ────────────────────────────────────────────────
+function renderAnleitung(){
+  const full = isFull();
+  const admin = isAdmin();
+  const roleLbl = admin ? 'Administrator' : (ROLLEN[myRole()] || '–');
+  const sect = (title, body) => `<div class="help-sec"><h3>${title}</h3>${body}</div>`;
+  const fullOnly = full
+    ? `<span class="help-tag ok">für dich verfügbar</span>`
+    : `<span class="help-tag">nur für vollberechtigte Rollen</span>`;
+
+  const html = `
+  <div class="form-card help" style="max-width:860px">
+    <h2>Bedienungsanleitung</h2>
+    <div class="fc-sub">DIHAG Besuchermanagement · angemeldet als <b>${esc(myUPN())}</b> · Rolle: <b>${esc(roleLbl)}</b></div>
+
+    ${sect('1 · Wofür ist die App?', `
+      <p>Sie ersetzt die Besucheranmeldung auf Papier: Besucher werden vorab angelegt, am Empfang ein- und ausgecheckt,
+      die Sicherheitsunterweisung (SHB) wird digital bestätigt. Daten liegen in SharePoint und werden nach
+      <b>90 Tagen automatisch gelöscht</b>.</p>`)}
+
+    ${sect('2 · Rollen &amp; Zugriff', `
+      <ul>
+        <li><b>SHB-Verantwortlicher</b> – legt Anmeldungen an, sieht nur die <b>eigenen</b> Datensätze.</li>
+        <li><b>Wachschutz / Sekretariat</b> – vollberechtigt: zusätzlich <b>Dashboard</b> (alle Datensätze) und <b>Reports</b>.</li>
+        <li><b>Administrator</b> – zusätzlich <b>Zugriffsverwaltung</b> (Rollen &amp; Werke vergeben).</li>
+      </ul>
+      <p>Der Zugriff ist zusätzlich je <b>Werk</b> begrenzt. Die vollständige Rechteübersicht findest du unter
+      <button class="link-btn" onclick="openSettings()">⚙️ Einstellungen → Rechtemodell</button>.</p>`)}
+
+    ${sect('3 · Neue Anmeldung anlegen', `
+      <ol>
+        <li>Reiter <b>„Neue Anmeldung"</b> öffnen.</li>
+        <li><b>Werk</b>, <b>Bereich</b>, <b>Ansprechpartner</b> (Gastgeber), <b>Datum</b> und <b>Firma</b> ausfüllen (Pflichtfelder mit <span class="req">*</span>).</li>
+        <li>Besucher eintragen; mit <b>„+ weitere Person (gleiche Firma)"</b> mehrere Personen ergänzen. Optionale Felder (Telefon, E-Mail, Kennzeichen) nur bei Bedarf.</li>
+        <li><b>Besuchszweck</b> und ausgegebene <b>PSA</b> ankreuzen.</li>
+        <li><b>Sicherheitshinweise SHB akzeptiert</b> anhaken und im Feld <b>digital unterschreiben</b> (Maus/Finger).</li>
+        <li><b>Speichern</b> – danach kannst du sofort eine Einladung senden (siehe 5).</li>
+      </ol>
+      <p class="help-note">Tipp: Datensätze am besten <b>vorab</b> erzeugen, damit der Empfang beim Eintreffen nur noch eincheckt.</p>`)}
+
+    ${sect('4 · Empfang / Check-in', `
+      <ul>
+        <li>Reiter <b>„Empfang / Check-in"</b> zeigt alle offenen Anmeldungen, nach Firma/Gruppe gebündelt.</li>
+        <li><b>Einchecken</b> beim Eintreffen → setzt die Eingangszeit (Status „Eingecheckt“).</li>
+        <li><b>Abmelden</b> beim Verlassen → setzt die Abgangszeit und <b>schließt</b> den Datensatz. Das geht nur, wenn die Pflichtfelder und die SHB-Bestätigung vorhanden sind.</li>
+      </ul>`)}
+
+    ${sect('5 · Einladung per E-Mail', `
+      <p>Nach dem Speichern (oder später in der Detailansicht über <b>„✉ Einladung"</b>) sendest du dem Besucher eine
+      Einladung mit Termin und Sicherheitshinweis – <b>direkt aus der App</b>, ohne Outlook.</p>
+      <p class="help-note">Beim <b>ersten</b> Versand fragt Microsoft einmalig nach der Berechtigung „E-Mail senden“. Bitte zustimmen und Popups für die App-Adresse erlauben.</p>`)}
+
+    ${sect(`6 · Dashboard ${fullOnly}`, `
+      <ul>
+        <li>Überblick mit Kennzahlen und <b>allen</b> Datensätzen deiner Werke – filterbar nach <b>Suche</b>, <b>Status</b> und <b>Werk</b>.</li>
+        <li>Die Kachel <b>„Noch anwesend &gt; ${ANWESEND_WARN_STUNDEN} h"</b> und der rote <b>⚠-Hinweis</b> markieren Besucher, die eingecheckt, aber noch nicht abgemeldet sind – wichtig für Vollständigkeit/Evakuierung.</li>
+      </ul>`)}
+
+    ${sect('7 · Eigene Datensätze &amp; Vorlagen', `
+      <ul>
+        <li>Reiter <b>„Eigene Datensätze"</b> zeigt die von dir selbst angelegten Anmeldungen.</li>
+        <li>Über <b>„Als Vorlage"</b> (in Detailansicht oder Karten) legst du eine neue Anmeldung aus einem bestehenden Datensatz an – ideal für wiederkehrende Besucher. Datum und Unterschrift bitte neu erfassen.</li>
+      </ul>`)}
+
+    ${admin ? sect('8 · Zugriffsverwaltung (Admin)', `
+      <p>Unter <button class="link-btn" onclick="openSettings()">⚙️ Einstellungen</button> → <b>Zugriffsverwaltung</b>:
+      E-Mail/UPN hinzufügen, <b>Rolle</b> wählen und <b>Werke</b> freigeben. Neue Nutzer starten als SHB-Verantwortlicher.
+      Warte nach dem Eintragen auf die Meldung <b>„Zugriffsrechte gespeichert ✓"</b>.</p>` ) : ''}
+
+    ${sect(`${admin?'9':'8'} · Datenschutz`, `
+      <ul>
+        <li>Verarbeitung nur zur Werks-/Besuchersicherheit und zum Nachweis der Unterweisung; Zugriff nach Bedarf je Werk.</li>
+        <li><b>90 Tage</b> Aufbewahrung, danach automatische Löschung.</li>
+        <li>Den <b>Datenschutzhinweis</b> (Aushang Empfang) findest du unter <button class="link-btn" onclick="showPrivacyNotice()">⚙️ Einstellungen → Datenschutzhinweis</button>.</li>
+      </ul>`)}
+
+    ${sect(`${admin?'10':'9'} · Wenn etwas hakt`, `
+      <ul>
+        <li><b>„Kein Zugriff"</b> → der Administrator muss dich (Werk + Rolle) freischalten. Die Meldung zeigt die genaue Ursache.</li>
+        <li><b>Gelbes Banner „fehlende Spalten"</b> → in der SharePoint-Liste fehlen Spalten (Administrator).</li>
+        <li><b>„Speichern abgelehnt – Diagnose"</b> → die App nennt die betroffene Spalte und den erwarteten Typ.</li>
+      </ul>`)}
+  </div>`;
+  $id('anleitung-body').innerHTML = html;
 }
 
 // ── EINSTELLUNGEN ───────────────────────────────────────────────────────────
