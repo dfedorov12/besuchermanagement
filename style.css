@@ -1328,3 +1328,8 @@ details#attach-extra-wrap[open] .attach-more-toggle { color:#374151; }
 .detail-head h2{font-size:1.2rem;font-weight:700;color:#1e2939}
 .mini-btn{background:none;border:1px solid #d1d5db;border-radius:6px;padding:3px 9px;font-size:.76rem;cursor:pointer;color:#374151}
 .mini-btn:hover{background:#f3f4f6}
+
+/* ── Besuchermanagement: Anwesenheits-Warnung ────────────────────────────── */
+.stat-card.overdue .stat-num{color:#dc2626}
+.visitor-card.overdue{border-left:3px solid #dc2626}
+.warn-chip{display:inline-block;padding:2px 8px;border-radius:20px;font-size:.7rem;font-weight:600;background:#fee2e2;color:#b91c1c;margin-left:2px}

@@ -34,6 +34,7 @@ const ROLLEN = {
 // „Vollberechtigt": sieht Dashboard + Reports + alle Datensätze der Werke.
 // (Admin ist immer vollberechtigt und darf zusätzlich Zugriffsrechte verwalten.)
 const FULL_ROLES = ['wachschutz', 'sekretariat'];
+const ANWESEND_WARN_STUNDEN = 8;   // eingecheckt länger als … Std. → als „noch anwesend" markieren
 
 // ── STATE ───────────────────────────────────────────────────────────────────
 let msalApp = null, account = null;
@@ -341,6 +342,9 @@ function isToday(iso){ return iso && iso.slice(0,10)===todayStr(); }
 function fmtDate(iso){ if(!iso) return '–'; const d=new Date(iso); return isNaN(d)?esc(iso):d.toLocaleDateString('de-DE'); }
 function fmtDateTime(iso){ if(!iso) return '–'; const d=new Date(iso); return isNaN(d)?esc(iso):d.toLocaleString('de-DE',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'}); }
 function fmtTime(iso){ if(!iso) return '–'; const d=new Date(iso); return isNaN(d)?esc(iso):d.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'}); }
+function hoursSince(iso){ const d=new Date(iso); return isNaN(d)?0:(Date.now()-d.getTime())/3600000; }
+// „Noch anwesend": eingecheckt und seit > ANWESEND_WARN_STUNDEN nicht abgemeldet.
+function isOverdue(i){ return i.status==='Eingecheckt' && !!i.eingang && hoursSince(i.eingang) >= ANWESEND_WARN_STUNDEN; }
 
 function statusBadge(s){ const cls={'Angemeldet':'status-angemeldet','Eingecheckt':'status-eingecheckt','Geschlossen':'status-geschlossen'}[s]||'status-angemeldet'; return `<span class="status-badge ${cls}">${esc(s)}</span>`; }
 function werkBadge(w){ return `<span class="werk-badge">${esc(w||'?')}</span>`; }
@@ -350,8 +354,10 @@ function renderDashboard(){
   const onSite = ITEMS.filter(i => i.status==='Eingecheckt');
   const todayReg = ITEMS.filter(i => isToday(i.besuchsdatum) || isToday(i.created));
   const closedToday = ITEMS.filter(i => i.status==='Geschlossen' && isToday(i.abgang));
+  const overdue = ITEMS.filter(isOverdue);
   $id('dash-stats').innerHTML = `
     <div class="stat-card on-site"><div class="stat-num">${onSite.length}</div><div class="stat-lbl">Aktuell anwesend</div></div>
+    <div class="stat-card overdue"><div class="stat-num">${overdue.length}</div><div class="stat-lbl">Noch anwesend &gt; ${ANWESEND_WARN_STUNDEN} h</div></div>
     <div class="stat-card today"><div class="stat-num">${todayReg.length}</div><div class="stat-lbl">Anmeldungen heute</div></div>
     <div class="stat-card"><div class="stat-num">${closedToday.length}</div><div class="stat-lbl">Heute abgemeldet</div></div>
     <div class="stat-card"><div class="stat-num">${ITEMS.length}</div><div class="stat-lbl">Datensätze gesamt</div></div>`;
@@ -374,9 +380,11 @@ function recordCard(i){
   const stamp = canStamp() ? (i.status==='Angemeldet'
       ? `<button class="btn btn-sm btn-success" onclick="event.stopPropagation();checkIn('${i.id}')">Einchecken</button>`
       : (i.status==='Eingecheckt' ? `<button class="btn btn-sm btn-outline" onclick="event.stopPropagation();checkOut('${i.id}')">Abmelden</button>` : '')) : '';
-  return `<div class="visitor-card" style="cursor:pointer" onclick="navigate('detail','${i.id}')">
+  const over = isOverdue(i);
+  const warn = over ? `<span class="warn-chip" title="Noch nicht abgemeldet">⚠ ${Math.floor(hoursSince(i.eingang))} h anwesend</span>` : '';
+  return `<div class="visitor-card${over?' overdue':''}" style="cursor:pointer" onclick="navigate('detail','${i.id}')">
     <div class="vc-main">
-      <div class="vc-name">${esc(i.besucherName)} ${werkBadge(i.werk)} ${statusBadge(i.status)}</div>
+      <div class="vc-name">${esc(i.besucherName)} ${werkBadge(i.werk)} ${statusBadge(i.status)} ${warn}</div>
       <div class="vc-sub">${esc(i.firma||'–')} · ${esc(i.bereich||'')} · ${fmtDate(i.besuchsdatum)} · Ein ${fmtTime(i.eingang)} / Ab ${fmtTime(i.abgang)}</div>
     </div>
     <div class="vc-actions">${stamp}${canCreate()?`<button class="mini-btn" onclick="event.stopPropagation();useAsTemplate('${i.id}')">Vorlage</button>`:''}<span class="mini-btn">Öffnen →</span></div>

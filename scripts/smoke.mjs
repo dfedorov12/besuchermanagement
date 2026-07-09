@@ -97,7 +97,7 @@ async function main() {
 
   // app.js in der Fensterrealität ausführen + Test-Handles exportieren
   let src = readFileSync(join(root, 'app.js'), 'utf8');
-  src += `\n;window.__app = { submitNew, navigate, applyTemplate, sendSavedInvite, get HAVE(){return HAVE}, get C(){return C}, WERKE, get account(){return account}, isFull, canSeeDashboard, canSeeReports, isMine };`;
+  src += `\n;window.__app = { submitNew, navigate, applyTemplate, sendSavedInvite, isOverdue, get HAVE(){return HAVE}, get C(){return C}, WERKE, get account(){return account}, isFull, canSeeDashboard, canSeeReports, isMine };`;
   w.eval(src);
 
   // Auf Boot warten (discoverSP füllt HAVE)
@@ -166,6 +166,12 @@ async function main() {
   ok(doc.querySelector('.nav-item[data-view="records"]').textContent.includes('Eigene Datensätze'), 'Nav „Eigene Datensätze" umbenannt');
   ok(w.__app.isMine({ createdByEmail:'administrator@dihag.com' }) === true, 'Eigener Datensatz (E-Mail) erkannt');
   ok(w.__app.isMine({ createdByEmail:'fremd@dihag.com', createdBy:'Jemand' }) === false, 'Fremder Datensatz nicht als eigener erkannt');
+
+  // Anwesenheits-Warnung (noch eingecheckt > 8 h)
+  const hAgo = h => new Date(Date.now() - h*3600000).toISOString();
+  ok(w.__app.isOverdue({ status:'Eingecheckt', eingang:hAgo(10) }) === true, 'Überfällig: >8 h anwesend erkannt');
+  ok(w.__app.isOverdue({ status:'Eingecheckt', eingang:hAgo(1) }) === false, 'Nicht überfällig: 1 h anwesend');
+  ok(w.__app.isOverdue({ status:'Geschlossen', eingang:hAgo(10) }) === false, 'Geschlossen ist nicht überfällig');
 
   // „Als Vorlage" – Formular aus einem Datensatz vorbefüllen
   w.__app.navigate('new');
