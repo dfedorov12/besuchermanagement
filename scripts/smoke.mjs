@@ -170,8 +170,41 @@ async function main() {
   ok(doc.querySelector('input[name="zweck"][value="Audit"]').checked, 'Vorlage: Besuchszweck übernommen');
   ok(doc.querySelector('#visitors [data-psa][value="Warnweste"]').checked, 'Vorlage: PSA übernommen');
 
+  await scenarioAccessMatch();
+
   console.log(failures ? `\nFEHLGESCHLAGEN: ${failures} Prüfung(en)` : '\nALLE PRÜFUNGEN BESTANDEN');
   process.exit(failures ? 1 : 0);
+}
+
+// Regression: Nicht-Admin, dessen Konfig-Schlüssel in GROSSschreibung hinterlegt ist,
+// muss trotzdem Zugriff bekommen (Kern des „Kein Zugriff trotz hinterlegt"-Bugs).
+async function scenarioAccessMatch() {
+  const html = readFileSync(join(root, 'index.html'), 'utf8');
+  const fetch2 = async (url, opts) => {
+    const u = String(url);
+    if (u.includes('/me?$select')) return resp({ userPrincipalName:'Tester@DIHAG.com', mail:'Tester@DIHAG.com', otherMails:[], proxyAddresses:[] });
+    if (u.includes('dihag.sharepoint.com:/sites/IT') && !u.includes('/lists')) return resp({ id:'siteid' });
+    if (u.includes('/lists/Besucheranmeldung')) return resp({ id:'listid', displayName:'Besucheranmeldung' });
+    if (u.includes('/lists/listid/columns')) return resp({ value: COLS.map(n => ({ name:n, displayName:n })) });
+    if (u.includes('/lists?$select=id,displayName')) return resp({ value: [{ id:'cfg', displayName:'BESU_Konfiguration' }] });
+    if (u.includes('/lists/cfg/items')) return resp({ value: [{ id:'a1', fields:{ Title:'access',
+      ConfigValue: JSON.stringify({ users: { 'Tester@DIHAG.com': { role:'sekretariat', werke:['SHB'] } } }) } }] });
+    if (u.includes('/lists/listid/items')) return resp({ value: [] });
+    return resp({});
+  };
+  class PCA2 extends FakePCA { getAllAccounts(){ return [{ username:'Tester@DIHAG.com', name:'Tester', idTokenClaims:{} }]; } }
+  const dom = new JSDOM(html, { url:'http://localhost:8767/', runScripts:'outside-only' });
+  const w = dom.window;
+  w.msal = { PublicClientApplication: PCA2 }; w.fetch = fetch2; w.event = undefined; w.confirm = () => true;
+  w.HTMLCanvasElement.prototype.getContext = () => ({ lineWidth:0,lineCap:'',strokeStyle:'',beginPath(){},moveTo(){},lineTo(){},stroke(){},clearRect(){} });
+  w.HTMLCanvasElement.prototype.toDataURL = () => 'data:image/png;base64,AAAA';
+  let src = readFileSync(join(root, 'app.js'), 'utf8');
+  src += `\n;window.__app2 = { get role(){return myRole()}, isFull, get access(){return myAccess()}, get state(){return accessLoadState} };`;
+  w.eval(src);
+  for (let i=0; i<60 && !(w.__app2 && w.__app2.access); i++) await sleep(50);
+  ok(w.document.getElementById('app').style.display === '', 'Zugriff trotz Groß-/Kleinschreibung im Konfig-Schlüssel');
+  ok(w.__app2.role === 'sekretariat', 'Rolle aus Konfig übernommen (sekretariat)');
+  ok(w.__app2.isFull(), 'sekretariat ist vollberechtigt');
 }
 
 main().catch(e => { console.error('Smoke-Test-Ausnahme:', e); process.exit(1); });

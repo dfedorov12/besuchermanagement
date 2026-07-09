@@ -205,18 +205,29 @@ async function _findConfigList(){
   }catch{ accessListId=null; }
   return accessListId;
 }
+// Zustand der letzten Konfig-Ladung – für die „Kein Zugriff"-Diagnose:
+// 'ok' | 'no-list' (Liste fehlt/nicht sichtbar) | 'read-failed' (keine Leseberechtigung) | 'parse-failed'
+let accessLoadState = 'unknown';
 async function loadAccessConfig(){
-  accessUsers={}; accessConfigItemId=null; accessListId=null;
+  accessUsers={}; accessConfigItemId=null; accessListId=null; accessLoadState='unknown';
   try{
-    if(!siteId) return;
+    if(!siteId){ accessLoadState='no-list'; return; }
     const lid = await _findConfigList();
-    if(!lid) return;
-    const res = await gGet(`/sites/${siteId}/lists/${lid}/items?$expand=fields&$top=200`);
+    if(!lid){ accessLoadState='no-list'; return; }
+    let res;
+    try{ res = await gGet(`/sites/${siteId}/lists/${lid}/items?$expand=fields&$top=200`); }
+    catch(e){ accessLoadState='read-failed'; console.warn('[Zugriff] Liste nicht lesbar:', e.message); return; }
     const item = (res.value||[]).find(it => (it.fields?.Title||'')===ACCESS_ITEM_TITLE);
-    if(item){ accessConfigItemId=item.id; try{ accessUsers = JSON.parse(_decodeSpText(item.fields?.ConfigValue)||'{}').users||{}; }catch{} }
-    // Normalisieren
-    Object.keys(accessUsers).forEach(u=>{ const v=accessUsers[u]||{}; accessUsers[u]={ role:v.role||'verantwortlicher', werke:Array.isArray(v.werke)?v.werke:[] }; });
-  }catch(e){ console.warn('[Zugriff]', e.message); }
+    if(item){
+      accessConfigItemId = item.id;
+      let raw = {};
+      try{ raw = JSON.parse(_decodeSpText(item.fields?.ConfigValue)||'{}').users||{}; }
+      catch(e){ accessLoadState='parse-failed'; console.warn('[Zugriff] JSON-Fehler:', e.message); return; }
+      // Schlüssel klein schreiben (robuster Abgleich mit den Nutzer-Identitäten)
+      Object.keys(raw).forEach(u=>{ const v=raw[u]||{}; accessUsers[String(u).trim().toLowerCase()]={ role:v.role||'verantwortlicher', werke:Array.isArray(v.werke)?v.werke:[] }; });
+    }
+    accessLoadState='ok';
+  }catch(e){ accessLoadState='read-failed'; console.warn('[Zugriff]', e.message); }
 }
 async function saveAccessConfig(){
   if(!isAdmin()){ toast('Nur Administrator darf Zugriffsrechte ändern.','error'); return; }
@@ -910,12 +921,29 @@ async function boot(){
     await discoverSP();
     await loadAccessConfig();
 
-    // Kein Zugriff → freundlicher Hinweis, keine Daten laden
+    // Kein Zugriff → Diagnose, keine Daten laden
     if(!myAccess()){
       $id('boot-spinner').style.display='none';
       bootSub('');
-      bootErr('Kein Zugriff freigeschaltet. Bitte den Administrator um Freigabe (Werk + Rolle) bitten. Angemeldet als: '+esc(myUPN()));
-      $id('boot-btn').style.display='inline-block'; $id('boot-btn').textContent='Abmelden'; $id('boot-btn').onclick=doLogout;
+      const ids = [..._myIdentities()];
+      const cnt = Object.keys(accessUsers).length;
+      let detail, showIds=false;
+      if (accessLoadState==='no-list')
+        detail = `Die Liste <b>${esc(ACCESS_LIST_NAME)}</b> wurde nicht gefunden oder ist für dich nicht sichtbar. Sie muss in der Site existieren und für die App-Nutzer <b>lesbar</b> sein (siehe SETUP.md §2).`;
+      else if (accessLoadState==='read-failed')
+        detail = `Die Liste <b>${esc(ACCESS_LIST_NAME)}</b> ist für dich nicht lesbar (fehlende Leseberechtigung). Bitte für die App-Nutzer mindestens <b>Lesen</b> auf diese Liste vergeben.`;
+      else if (accessLoadState==='parse-failed')
+        detail = `Die Konfiguration konnte nicht gelesen werden (ungültiger Inhalt in <b>ConfigValue</b>). Der Administrator sollte den Eintrag unter ⚙️ neu speichern.`;
+      else if (cnt===0)
+        detail = `Es ist noch niemand freigeschaltet – oder das Speichern hat nicht funktioniert. Der Administrator muss dich unter ⚙️ → Zugriffsverwaltung eintragen (und die Erfolgsmeldung „gespeichert ✓" abwarten).`;
+      else { detail = `Du bist unter keiner deiner Anmelde-Adressen eingetragen. Der Administrator sollte dich unter <b>einer dieser</b> Adressen freischalten:`; showIds=true; }
+      bootErr('');
+      const eb = $id('boot-err');
+      eb.innerHTML =
+        `Kein Zugriff freigeschaltet – angemeldet als <b>${esc(myUPN())}</b>.<br><br>${detail}` +
+        (showIds ? `<br><span style="font-size:.85em">${ids.map(esc).join('<br>')}</span>` : '') +
+        `<br><br><span style="font-size:.8em;color:#9ca3af">Diagnose: Konfig-Liste ${accessListId?'gefunden':'nicht gefunden'} · Status „${esc(accessLoadState)}" · ${cnt} Nutzer freigeschaltet.</span>`;
+      $id('boot-btn').style.display='inline-block'; $id('boot-btn').textContent='Erneut versuchen'; $id('boot-btn').onclick=()=>location.reload();
       return;
     }
 
