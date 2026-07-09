@@ -48,7 +48,7 @@
       </a>
       <a href="#" class="nav-item" data-view="records">
         <svg viewBox="0 0 20 20" fill="currentColor"><path d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z"/></svg>
-        Datensätze
+        Eigene Datensätze
       </a>
       <a href="#" class="nav-item" data-view="reports">
         <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v14a1 1 0 01-1 1H4a1 1 0 01-1-1V3zm3 3a1 1 0 000 2h.01a1 1 0 100-2H6zm3 0a1 1 0 000 2h4a1 1 0 100-2H9zm-3 4a1 1 0 100 2h.01a1 1 0 100-2H6zm3 0a1 1 0 100 2h4a1 1 0 100-2H9zm-3 4a1 1 0 100 2h.01a1 1 0 100-2H6zm3 0a1 1 0 100 2h4a1 1 0 100-2H9z" clip-rule="evenodd"/></svg>
@@ -93,11 +93,19 @@
         <div class="view-toolbar">
           <div class="search-box">
             <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd"/></svg>
-            <input type="text" id="search-dashboard" placeholder="Anwesende suchen …" oninput="renderDashboard()"/>
+            <input type="text" id="search-dashboard" placeholder="Name, Firma, Bereich, Kennzeichen …" oninput="renderDashboard()"/>
           </div>
+          <select id="dash-status" class="sort-select" onchange="renderDashboard()">
+            <option value="">Alle Status</option>
+            <option value="Angemeldet">Angemeldet</option>
+            <option value="Eingecheckt">Anwesend</option>
+            <option value="Geschlossen">Geschlossen</option>
+          </select>
+          <select id="dash-werk" class="sort-select" onchange="renderDashboard()">
+            <option value="">Alle Werke</option>
+          </select>
         </div>
-        <h3 class="section-h">Aktuell anwesend</h3>
-        <div id="dash-onsite"></div>
+        <div id="dash-list"></div>
       </div>
 
       <!-- NEUE ANMELDUNG -->

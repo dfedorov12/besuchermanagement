@@ -71,9 +71,15 @@ Falls der Name abweicht: `SP_SITE` in `app.js` und in den Workflow-Variablen anp
 | `ConfigValue` | Mehrere Textzeilen (hält JSON) |
 
 Die App legt das `access`-Element selbst an; die **Liste** muss manuell existieren.
-Admin (`administrator@dihag.com`) pflegt in der App unter ⚙️ pro Person **Rolle + freigegebene Werke**.
+Admins (`administrator@dihag.com`, `fedorov@dihag.com`) pflegen in der App unter ⚙️ pro Person **Rolle + freigegebene Werke**.
 
-**Rollen:** `wachschutz` (nur Ein-/Abgang stempeln) · `verantwortlicher` (anlegen & bearbeiten) · `sekretariat` (voll).
+**Rollen:**
+- `verantwortlicher` – legt Anmeldungen an und sieht **nur eigene** Datensätze; kein Dashboard, keine Reports.
+- `wachschutz` – **vollberechtigt** (wie Sekretariat): Dashboard mit allen Datensätzen, Reports, anlegen/ein-/auschecken.
+- `sekretariat` – **vollberechtigt**.
+- **Admin** – vollberechtigt **und** darf Zugriffsrechte verwalten.
+
+**Vollberechtigt** = Dashboard (alle Datensätze der Werke, filterbar) + Reports. Neue Nutzer starten als `verantwortlicher`.
 Wer nicht eingetragen ist, hat **keinen** Zugriff (privacy-by-default).
 
 ## 3. GitHub Pages

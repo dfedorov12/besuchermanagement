@@ -26,10 +26,13 @@ const WERKE = ['DIHAG','DSO','EIS','EWA','LEG','MEG','SCH','SHB','WGC','ZAI'];
 const BESUCHSZWECKE = ['Werksbesichtigung','Kundenbesuch','Audit','Lieferantenbesuch','Sonstiges','DIHAG'];
 const PSA_LISTE     = ['Schutzhelm','Schutzbrille','Eigene PSA','Warnweste','Gehörschutz'];
 const ROLLEN = {
-  wachschutz:      'Wachschutz (nur Ein-/Abgang stempeln)',
-  verantwortlicher:'SHB-Verantwortlicher (anlegen & bearbeiten)',
+  verantwortlicher:'SHB-Verantwortlicher (nur eigene Anmeldungen)',
+  wachschutz:      'Wachschutz (voll)',
   sekretariat:     'Sekretariat (voll)'
 };
+// „Vollberechtigt": sieht Dashboard + Reports + alle Datensätze der Werke.
+// (Admin ist immer vollberechtigt und darf zusätzlich Zugriffsrechte verwalten.)
+const FULL_ROLES = ['wachschutz', 'sekretariat'];
 
 // ── STATE ───────────────────────────────────────────────────────────────────
 let msalApp = null, account = null;
@@ -176,10 +179,20 @@ function myAccess(){
 function allowedWerke(){ const a = myAccess(); return a ? a.werke.slice() : []; }
 function myRole(){ const a = myAccess(); return a ? a.role : null; }
 function canView(werk){ return isAdmin() || allowedWerke().includes(werk); }
-function canCreate(){ const r=myRole(); return r==='admin'||r==='verantwortlicher'||r==='sekretariat'; }
-function canEditFull(){ return canCreate(); }
-function canStamp(){ const r=myRole(); return r==='admin'||r==='wachschutz'||r==='verantwortlicher'||r==='sekretariat'; }
+function isFull(){ return isAdmin() || FULL_ROLES.includes(myRole()); }   // vollberechtigt
+function canCreate(){ return myRole() != null; }        // jede Rolle darf anlegen
+function canEditFull(){ return isFull(); }
+function canStamp(){ return myRole() != null; }          // jede Rolle darf ein-/auschecken
+function canSeeDashboard(){ return isFull(); }
+function canSeeReports(){ return isFull(); }
 function canManageAccess(){ return isAdmin(); }
+// „Eigener" Datensatz: vom aktuellen Nutzer erstellt (E-Mail oder Anzeigename).
+function isMine(i){
+  const ids = _myIdentities();
+  if (i.createdByEmail && ids.has(i.createdByEmail)) return true;
+  if (i.createdBy && account?.name && i.createdBy === account.name) return true;
+  return false;
+}
 
 function _decodeSpText(s){ if(s==null) return ''; const noTags=String(s).replace(/<[^>]*>/g,''); const ta=document.createElement('textarea'); ta.innerHTML=noTags; return ta.value; }
 
@@ -201,7 +214,7 @@ async function loadAccessConfig(){
     const item = (res.value||[]).find(it => (it.fields?.Title||'')===ACCESS_ITEM_TITLE);
     if(item){ accessConfigItemId=item.id; try{ accessUsers = JSON.parse(_decodeSpText(item.fields?.ConfigValue)||'{}').users||{}; }catch{} }
     // Normalisieren
-    Object.keys(accessUsers).forEach(u=>{ const v=accessUsers[u]||{}; accessUsers[u]={ role:v.role||'wachschutz', werke:Array.isArray(v.werke)?v.werke:[] }; });
+    Object.keys(accessUsers).forEach(u=>{ const v=accessUsers[u]||{}; accessUsers[u]={ role:v.role||'verantwortlicher', werke:Array.isArray(v.werke)?v.werke:[] }; });
   }catch(e){ console.warn('[Zugriff]', e.message); }
 }
 async function saveAccessConfig(){
@@ -247,8 +260,9 @@ function normalize(it){
     status:      _v(f,'Status')||'Angemeldet',
     bemerkungen: _v(f,'Bemerkungen')||'',
     gruppenId:   _v(f,'GruppenId')||'',
-    created:     it.createdDateTime||'',
-    createdBy:   it.createdBy?.user?.displayName||''
+    created:       it.createdDateTime||'',
+    createdBy:      it.createdBy?.user?.displayName||'',
+    createdByEmail: (it.createdBy?.user?.email||'').toLowerCase()
   };
 }
 async function loadItems(force){
@@ -266,8 +280,11 @@ async function loadItems(force){
 }
 
 // ── NAVIGATION ──────────────────────────────────────────────────────────────
-const VIEW_TITLES = { dashboard:'Dashboard', new:'Neue Anmeldung', checkin:'Empfang / Check-in', records:'Datensätze', reports:'Reports', detail:'Details' };
+const VIEW_TITLES = { dashboard:'Dashboard', new:'Neue Anmeldung', checkin:'Empfang / Check-in', records:'Eigene Datensätze', reports:'Reports', detail:'Details' };
 function navigate(view, arg){
+  // Zugriffsgrenzen für gesperrte Bereiche (Nav ist ohnehin ausgeblendet)
+  if (view==='dashboard' && !canSeeDashboard()) view = 'new';
+  if (view==='reports'   && !canSeeReports())   view = 'new';
   currentView = view;
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
   const el = $id('view-'+view); if(el) el.classList.add('active');
@@ -287,11 +304,21 @@ function renderCurrentView(){
   else if (currentView==='reports') renderReports();
 }
 function applyNavVisibility(){
-  const showNew = canCreate();
-  document.querySelector('.nav-item[data-view="new"]').style.display = showNew ? '' : 'none';
+  const vis = (v,on)=>{ const el=document.querySelector(`.nav-item[data-view="${v}"]`); if(el) el.style.display = on ? '' : 'none'; };
+  vis('dashboard', canSeeDashboard());
+  vis('new',       canCreate());
+  vis('reports',   canSeeReports());
   const role = myRole();
   const rb = $id('hdr-role');
-  if (rb){ rb.style.display=''; rb.textContent = role==='admin' ? 'Administrator' : (ROLLEN[role]? role : 'Kein Zugriff'); }
+  if (rb){ rb.style.display=''; rb.textContent = role==='admin' ? 'Administrator' : (ROLLEN[role] || 'Kein Zugriff'); }
+  fillWerkFilter();
+}
+// Werk-Filter im Dashboard mit den freigegebenen Werken füllen
+function fillWerkFilter(){
+  const sel = $id('dash-werk'); if(!sel) return;
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">Alle Werke</option>' + allowedWerke().map(w=>`<option value="${esc(w)}">${esc(w)}</option>`).join('');
+  sel.value = cur;
 }
 
 // ── DASHBOARD ───────────────────────────────────────────────────────────────
@@ -305,6 +332,7 @@ function statusBadge(s){ const cls={'Angemeldet':'status-angemeldet','Eingecheck
 function werkBadge(w){ return `<span class="werk-badge">${esc(w||'?')}</span>`; }
 
 function renderDashboard(){
+  if(!canSeeDashboard()){ $id('dash-list').innerHTML = `<div class="empty-state">Das Dashboard ist nur für vollberechtigte Rollen sichtbar.</div>`; $id('dash-stats').innerHTML=''; return; }
   const onSite = ITEMS.filter(i => i.status==='Eingecheckt');
   const todayReg = ITEMS.filter(i => isToday(i.besuchsdatum) || isToday(i.created));
   const closedToday = ITEMS.filter(i => i.status==='Geschlossen' && isToday(i.abgang));
@@ -312,28 +340,32 @@ function renderDashboard(){
     <div class="stat-card on-site"><div class="stat-num">${onSite.length}</div><div class="stat-lbl">Aktuell anwesend</div></div>
     <div class="stat-card today"><div class="stat-num">${todayReg.length}</div><div class="stat-lbl">Anmeldungen heute</div></div>
     <div class="stat-card"><div class="stat-num">${closedToday.length}</div><div class="stat-lbl">Heute abgemeldet</div></div>
-    <div class="stat-card"><div class="stat-num">${allowedWerke().length}</div><div class="stat-lbl">Meine Werke</div></div>`;
+    <div class="stat-card"><div class="stat-num">${ITEMS.length}</div><div class="stat-lbl">Datensätze gesamt</div></div>`;
 
   const q = ($id('search-dashboard')?.value||'').toLowerCase();
-  const list = onSite.filter(i => !q || (i.besucherName+' '+i.firma+' '+i.werk+' '+i.bereich).toLowerCase().includes(q));
-  const body = $id('dash-onsite');
-  if(!list.length){ body.innerHTML = `<div class="empty-state">Aktuell niemand eingecheckt.</div>`; return; }
-  body.innerHTML = list.map(visitorCard).join('');
+  const status = $id('dash-status')?.value||'';
+  const werk = $id('dash-werk')?.value||'';
+  const list = ITEMS.filter(i => recordMatches(i, q, status, werk));
+  const body = $id('dash-list');
+  body.innerHTML = list.length ? list.map(recordCard).join('') : `<div class="empty-state">Keine Datensätze für diesen Filter.</div>`;
 }
-function visitorCard(i){
-  const stampInfo = i.eingang ? `seit ${fmtTime(i.eingang)}` : '';
-  const actions = canStamp()
-    ? `<button class="btn btn-sm btn-outline" onclick="checkOut('${i.id}')">Abmelden</button>`
-    : '';
-  return `<div class="visitor-card">
+// Gemeinsame Filter-/Karten-Helfer für Dashboard und Eigene Datensätze
+function recordMatches(i, q, status, werk){
+  if (status && i.status !== status) return false;
+  if (werk && i.werk !== werk) return false;
+  if (q && !((i.besucherName+' '+i.firma+' '+i.werk+' '+i.bereich+' '+i.kennzeichen+' '+i.ansprechName).toLowerCase().includes(q))) return false;
+  return true;
+}
+function recordCard(i){
+  const stamp = canStamp() ? (i.status==='Angemeldet'
+      ? `<button class="btn btn-sm btn-success" onclick="event.stopPropagation();checkIn('${i.id}')">Einchecken</button>`
+      : (i.status==='Eingecheckt' ? `<button class="btn btn-sm btn-outline" onclick="event.stopPropagation();checkOut('${i.id}')">Abmelden</button>` : '')) : '';
+  return `<div class="visitor-card" style="cursor:pointer" onclick="navigate('detail','${i.id}')">
     <div class="vc-main">
-      <div class="vc-name">${esc(i.besucherName)} ${werkBadge(i.werk)}</div>
-      <div class="vc-sub">${esc(i.firma||'–')} · ${esc(i.bereich||'')} · ${stampInfo} · Gastgeber: ${esc(i.ansprechName||'–')}</div>
+      <div class="vc-name">${esc(i.besucherName)} ${werkBadge(i.werk)} ${statusBadge(i.status)}</div>
+      <div class="vc-sub">${esc(i.firma||'–')} · ${esc(i.bereich||'')} · ${fmtDate(i.besuchsdatum)} · Ein ${fmtTime(i.eingang)} / Ab ${fmtTime(i.abgang)}</div>
     </div>
-    <div class="vc-actions">
-      <button class="mini-btn" onclick="navigate('detail','${i.id}')">Details</button>
-      ${actions}
-    </div>
+    <div class="vc-actions">${stamp}<span class="mini-btn">Öffnen →</span></div>
   </div>`;
 }
 
@@ -670,18 +702,10 @@ function renderCheckin(){
 function renderRecords(){
   const q = ($id('search-records')?.value||'').toLowerCase();
   const sf = $id('filter-status')?.value||'';
-  let list = ITEMS.filter(i => !sf || i.status===sf)
-    .filter(i => !q || (i.besucherName+' '+i.firma+' '+i.werk+' '+i.bereich+' '+i.kennzeichen).toLowerCase().includes(q));
+  const list = ITEMS.filter(isMine).filter(i => recordMatches(i, q, sf, ''));
   const body = $id('records-body');
-  if(!list.length){ body.innerHTML = `<div class="empty-state">Keine Datensätze.</div>`; return; }
-  body.innerHTML = list.map(i=>`
-    <div class="visitor-card" style="cursor:pointer" onclick="navigate('detail','${i.id}')">
-      <div class="vc-main">
-        <div class="vc-name">${esc(i.besucherName)} ${werkBadge(i.werk)} ${statusBadge(i.status)}</div>
-        <div class="vc-sub">${esc(i.firma||'–')} · ${fmtDate(i.besuchsdatum)} · Ein ${fmtTime(i.eingang)} / Ab ${fmtTime(i.abgang)}</div>
-      </div>
-      <div class="vc-actions"><span class="mini-btn">Öffnen →</span></div>
-    </div>`).join('');
+  if(!list.length){ body.innerHTML = `<div class="empty-state">Noch keine eigenen Datensätze – lege unter „Neue Anmeldung" welche an.</div>`; return; }
+  body.innerHTML = list.map(recordCard).join('');
 }
 
 // ── DETAIL ──────────────────────────────────────────────────────────────────
@@ -728,6 +752,7 @@ async function deleteItem(id){
 // ── REPORTS ─────────────────────────────────────────────────────────────────
 function renderReports(){
   const body = $id('reports-body');
+  if(!canSeeReports()){ body.innerHTML = `<div class="empty-state">Reports sind nur für vollberechtigte Rollen sichtbar.</div>`; return; }
   const per = {}; allowedWerke().forEach(w=>per[w]={ges:0,anwesend:0});
   ITEMS.forEach(i=>{ if(!per[i.werk]) per[i.werk]={ges:0,anwesend:0}; per[i.werk].ges++; if(i.status==='Eingecheckt') per[i.werk].anwesend++; });
   const rows = Object.entries(per).sort((a,b)=>b[1].ges-a[1].ges)
@@ -779,7 +804,7 @@ function closeSettings(){ $id('settings-modal').classList.add('hidden'); }
 function addAccessUser(){
   const inp=$id('access-new-upn'); const upn=(inp?.value||'').trim().toLowerCase();
   if(!upn||!/@/.test(upn)){ toast('Bitte gültige E-Mail/UPN angeben.','error'); return; }
-  if(!accessUsers[upn]) accessUsers[upn]={ role:'wachschutz', werke:[] };
+  if(!accessUsers[upn]) accessUsers[upn]={ role:'verantwortlicher', werke:[] };
   saveAccessConfig(); openSettings();
 }
 function removeAccessUser(upn){ delete accessUsers[(upn||'').trim().toLowerCase()]; saveAccessConfig(); openSettings(); }
@@ -840,7 +865,7 @@ async function boot(){
     $id('boot').style.display='none';
     $id('app').style.display='';
     await loadItems();
-    navigate('dashboard');
+    navigate(canSeeDashboard() ? 'dashboard' : 'new');
   }catch(e){
     console.error(e);
     $id('boot-spinner').style.display='none';

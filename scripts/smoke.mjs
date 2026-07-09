@@ -95,7 +95,7 @@ async function main() {
 
   // app.js in der Fensterrealität ausführen + Test-Handles exportieren
   let src = readFileSync(join(root, 'app.js'), 'utf8');
-  src += `\n;window.__app = { submitNew, navigate, get HAVE(){return HAVE}, get C(){return C}, WERKE, get account(){return account} };`;
+  src += `\n;window.__app = { submitNew, navigate, get HAVE(){return HAVE}, get C(){return C}, WERKE, get account(){return account}, isFull, canSeeDashboard, canSeeReports, isMine };`;
   w.eval(src);
 
   // Auf Boot warten (discoverSP füllt HAVE)
@@ -147,6 +147,16 @@ async function main() {
   ok(Array.isArray(f.Besuchszweck) && f.Besuchszweck.join(',') === 'Audit', 'Besuchszweck als Array gesendet');
   ok(f['Besuchszweck@odata.type'] === 'Collection(Edm.String)', 'Multi-Choice Besuchszweck mit @odata.type annotiert');
   ok(f['PSA@odata.type'] === 'Collection(Edm.String)', 'Multi-Choice PSA mit @odata.type annotiert');
+
+  // Rollen & Sichtbarkeit (Admin ist vollberechtigt)
+  ok(w.__app.isFull(), 'Admin ist vollberechtigt');
+  ok(w.__app.canSeeDashboard(), 'Dashboard für Vollberechtigte/Admin sichtbar');
+  ok(w.__app.canSeeReports(), 'Reports für Vollberechtigte/Admin sichtbar');
+  ok(doc.querySelector('.nav-item[data-view="dashboard"]').style.display !== 'none', 'Dashboard-Nav sichtbar (Admin)');
+  ok(doc.querySelector('.nav-item[data-view="reports"]').style.display !== 'none', 'Reports-Nav sichtbar (Admin)');
+  ok(doc.querySelector('.nav-item[data-view="records"]').textContent.includes('Eigene Datensätze'), 'Nav „Eigene Datensätze" umbenannt');
+  ok(w.__app.isMine({ createdByEmail:'fedorov@dihag.com' }) === true, 'Eigener Datensatz (E-Mail) erkannt');
+  ok(w.__app.isMine({ createdByEmail:'fremd@dihag.com', createdBy:'Jemand' }) === false, 'Fremder Datensatz nicht als eigener erkannt');
 
   console.log(failures ? `\nFEHLGESCHLAGEN: ${failures} Prüfung(en)` : '\nALLE PRÜFUNGEN BESTANDEN');
   process.exit(failures ? 1 : 0);
