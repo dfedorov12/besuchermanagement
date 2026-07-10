@@ -1142,8 +1142,7 @@ function renderAnleitung(){
 
     ${sect('5 · Einladung per E-Mail', `
       <p>Nach dem Speichern (oder später in der Detailansicht über <b>„✉ Einladung"</b>) senden Sie dem Besucher eine
-      Einladung mit Termin und Sicherheitshinweis – <b>direkt aus der App</b>, ohne Outlook.</p>
-      <p class="help-note">Beim <b>ersten</b> Versand fragt Microsoft einmalig nach der Berechtigung „E-Mail senden“. Bitte zustimmen und Popups für die App-Adresse erlauben.</p>`)}
+      Einladung mit Termin und Sicherheitshinweis – <b>direkt aus der App</b>, ohne Outlook.</p>`)}
 
     ${sect(`6 · Dashboard ${fullOnly}`, `
       <ul>
