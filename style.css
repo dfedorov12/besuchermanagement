@@ -1360,3 +1360,8 @@ details#attach-extra-wrap[open] .attach-more-toggle { color:#374151; }
 /* ── Besuchermanagement: SHB-Button ──────────────────────────────────────── */
 .btn-warn{background:#f59e0b;color:#fff}
 .btn-warn:hover{background:#d97706}
+
+/* ── Besuchermanagement: Modal scrollbar bei viel Inhalt (z. B. Einstellungen) ── */
+.modal{ max-height: calc(100vh - 40px); display: flex; flex-direction: column; }
+.modal-header, .modal-footer{ flex-shrink: 0; }
+.modal-body{ overflow-y: auto; }
