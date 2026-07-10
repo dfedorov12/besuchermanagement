@@ -64,6 +64,7 @@ Falls der Name abweicht: `SP_SITE` in `app.js` und in den Workflow-Variablen anp
 | `Status` | Auswahl | Angemeldet, Eingecheckt, Geschlossen |
 | `Bemerkungen` | Mehrere Textzeilen | |
 | `GruppenId` | Einzeltext | verbindet Personen einer Anmeldung |
+| `ErstellerUPN` | Einzeltext | optional, empfohlen – macht „Eigene Datensätze" zuverlässig (UPN des Erstellers) |
 
 > Interne Spaltennamen sollten den Anzeigenamen entsprechen (keine Sonderzeichen/Leerzeichen). Die App
 > matcht zusätzlich auf Anzeigenamen und meldet fehlende Spalten im gelben Banner oben.

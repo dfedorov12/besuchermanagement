@@ -22,7 +22,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 // Vom Mock-SharePoint bekannte Spalten (INTERN). Bewusst OHNE Funktion/BesucherTelefon.
 const COLS = ['Title','Werk','Bereich','AnsprechpartnerName','AnsprechpartnerTelefon',
   'Besuchsdatum','Ankunftszeit','Firma','BesucherEmail','Autokennzeichen','Besuchszweck',
-  'PSA','SHBAkzeptiert','Signatur','Eingangszeit','Abgangszeit','Status','Bemerkungen','GruppenId'];
+  'PSA','SHBAkzeptiert','Signatur','Eingangszeit','Abgangszeit','Status','Bemerkungen','GruppenId','ErstellerUPN'];
 const COLSET = new Set(COLS);
 
 const posts = [];           // erfasste POST-Bodies (fields)
@@ -97,7 +97,7 @@ async function main() {
 
   // app.js in der Fensterrealität ausführen + Test-Handles exportieren
   let src = readFileSync(join(root, 'app.js'), 'utf8');
-  src += `\n;window.__app = { submitNew, navigate, applyTemplate, sendSavedInvite, isOverdue, get HAVE(){return HAVE}, get C(){return C}, WERKE, get account(){return account}, isFull, canSeeDashboard, canSeeReports, isMine };`;
+  src += `\n;window.__app = { submitNew, navigate, applyTemplate, sendSavedInvite, isOverdue, buildCsv, canEditItem, findDuplicate, get HAVE(){return HAVE}, get C(){return C}, WERKE, get account(){return account}, isFull, canSeeDashboard, canSeeReports, isMine };`;
   w.eval(src);
 
   // Auf Boot warten (discoverSP füllt HAVE)
@@ -145,6 +145,8 @@ async function main() {
   ok(f.BesucherEmail === 'max@acme.example', 'Vorhandene Spalte BesucherEmail gesendet');
   ok(!('Funktion' in f), 'Fehlende Spalte Funktion NICHT gesendet');
   ok(!('BesucherTelefon' in f), 'Fehlende Spalte BesucherTelefon NICHT gesendet');
+  ok(f.ErstellerUPN === 'administrator@dihag.com', 'ErstellerUPN beim Anlegen gesetzt');
+  ok(w.__app.isMine({ creatorUPN:'administrator@dihag.com' }) === true, 'isMine über ErstellerUPN');
   ok(Object.keys(f).every(k => k.includes('@') || COLSET.has(k)), 'Alle gesendeten Felder existieren als Spalte');
   ok(Array.isArray(f.Besuchszweck) && f.Besuchszweck.join(',') === 'Audit', 'Besuchszweck als Array gesendet');
   ok(f['Besuchszweck@odata.type'] === 'Collection(Edm.String)', 'Multi-Choice Besuchszweck mit @odata.type annotiert');
@@ -172,6 +174,13 @@ async function main() {
   ok(w.__app.isOverdue({ status:'Eingecheckt', eingang:hAgo(10) }) === true, 'Überfällig: >8 h anwesend erkannt');
   ok(w.__app.isOverdue({ status:'Eingecheckt', eingang:hAgo(1) }) === false, 'Nicht überfällig: 1 h anwesend');
   ok(w.__app.isOverdue({ status:'Geschlossen', eingang:hAgo(10) }) === false, 'Geschlossen ist nicht überfällig');
+
+  // Weitere Optimierungen: CSV, Bearbeiten-Recht, Dubletten
+  const csv = w.__app.buildCsv([{ werk:'SHB', bereich:'Halle;3', besucherName:'Max "M"', firma:'ACME', funktion:'', tel:'', email:'', kennzeichen:'', besuchsdatum:'2026-07-09', eingang:'', abgang:'', status:'Angemeldet', ansprechName:'Chef', zweck:['Audit'], psa:['Warnweste'] }]);
+  ok(csv.split('\r\n')[0].startsWith('﻿Werk;Bereich;Besucher'), 'CSV: Kopfzeile mit BOM');
+  ok(csv.includes('"Halle;3"') && csv.includes('"Max ""M"""'), 'CSV: Sonderzeichen korrekt maskiert');
+  ok(w.__app.canEditItem({}) === true, 'Admin darf bearbeiten');
+  ok(w.__app.findDuplicate('Niemand','Nirgends','2026-07-09') === undefined, 'Dublettenprüfung ohne Treffer');
 
   // Anleitung-Reiter
   w.__app.navigate('anleitung');

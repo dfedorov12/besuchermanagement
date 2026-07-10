@@ -84,12 +84,21 @@ async function getToken(force){
 }
 
 // ── GRAPH ───────────────────────────────────────────────────────────────────
+const _sleep = ms => new Promise(r=>setTimeout(r, ms));
 async function gFetch(path, opts){
   const token = await getToken();
   const url = path.startsWith('http') ? path : API + path;
-  const r = await fetch(url, { ...opts, headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json', ...(opts&&opts.headers||{}) } });
-  if (!r.ok){ const txt = await r.text(); throw new Error(`${r.status} ${r.statusText} – ${txt.slice(0,300)}`); }
-  return r.status===204 ? null : r.json();
+  for (let attempt=0; ; attempt++){
+    const r = await fetch(url, { ...opts, headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json', ...(opts&&opts.headers||{}) } });
+    // Throttling (429) / kurzzeitige Serverfehler (503) → mit Backoff erneut versuchen
+    if ((r.status===429 || r.status===503) && attempt < 3){
+      const ra = parseInt(r.headers.get('Retry-After')||'', 10);
+      await _sleep(Number.isFinite(ra) ? ra*1000 : (attempt+1)*1000);
+      continue;
+    }
+    if (!r.ok){ const txt = await r.text(); throw new Error(`${r.status} ${r.statusText} – ${txt.slice(0,300)}`); }
+    return r.status===204 ? null : r.json();
+  }
 }
 const gGet    = p => gFetch(p);
 const gPost   = (p,b) => gFetch(p,{ method:'POST',  body:JSON.stringify(b) });
@@ -118,7 +127,8 @@ const FIELD_DEFS = [
   { k:'Abgangszeit',     cands:['Abgangszeit'] },
   { k:'Status',          cands:['Status'] },            // Choice: Angemeldet/Eingecheckt/Geschlossen
   { k:'Bemerkungen',     cands:['Bemerkungen'] },
-  { k:'GruppenId',       cands:['GruppenId','Besuchsgruppe'] }
+  { k:'GruppenId',       cands:['GruppenId','Besuchsgruppe'] },
+  { k:'ErstellerUPN',    cands:['ErstellerUPN','ErstelltVon'] }   // optional: zuverlässige „Eigene Datensätze"
 ];
 
 async function discoverSP(){
@@ -143,7 +153,7 @@ async function discoverSP(){
       if (byDisp.has(lc)) { internal = byDisp.get(lc); break; }
     }
     if (internal) { C[f.k] = internal; HAVE.add(f.k); }
-    else { C[f.k] = f.cands[0]; if (f.k!=='GruppenId') missing.push(f.cands[0]); }
+    else { C[f.k] = f.cands[0]; if (f.k!=='GruppenId' && f.k!=='ErstellerUPN') missing.push(f.cands[0]); }
   });
   if (missing.length){
     const w = $id('col-warning');
@@ -190,13 +200,16 @@ function canStamp(){ return myRole() != null; }          // jede Rolle darf ein-
 function canSeeDashboard(){ return isFull(); }
 function canSeeReports(){ return isFull(); }
 function canManageAccess(){ return isAdmin(); }
-// „Eigener" Datensatz: vom aktuellen Nutzer erstellt (E-Mail oder Anzeigename).
+// „Eigener" Datensatz: vom aktuellen Nutzer erstellt (ErstellerUPN, Graph-E-Mail oder Anzeigename).
 function isMine(i){
   const ids = _myIdentities();
+  if (i.creatorUPN && ids.has(String(i.creatorUPN).toLowerCase())) return true;
   if (i.createdByEmail && ids.has(i.createdByEmail)) return true;
   if (i.createdBy && account?.name && i.createdBy === account.name) return true;
   return false;
 }
+// Bearbeiten: Vollberechtigte alle, sonstige Rollen nur eigene Datensätze.
+function canEditItem(i){ return isFull() || (canCreate() && isMine(i)); }
 
 function _decodeSpText(s){ if(s==null) return ''; const noTags=String(s).replace(/<[^>]*>/g,''); const ta=document.createElement('textarea'); ta.innerHTML=noTags; return ta.value; }
 
@@ -275,15 +288,17 @@ function normalize(it){
     status:      _v(f,'Status')||'Angemeldet',
     bemerkungen: _v(f,'Bemerkungen')||'',
     gruppenId:   _v(f,'GruppenId')||'',
+    creatorUPN:  _v(f,'ErstellerUPN')||'',
     created:       it.createdDateTime||'',
     createdBy:      it.createdBy?.user?.displayName||'',
     createdByEmail: (it.createdBy?.user?.email||'').toLowerCase()
   };
 }
+function setLoading(on){ const b=$id('loadbar'); if(b) b.style.display = on ? 'block' : 'none'; }
 async function loadItems(force){
   if(!siteId||!listId){ try{ await discoverSP(); }catch(e){ toast('SharePoint nicht erreichbar: '+e.message,'error'); return; } }
+  setLoading(true);
   try{
-    if(force) toast('Wird aktualisiert …','info');
     const res = await gGet(`/sites/${siteId}/lists/${listId}/items?$expand=fields&$top=500&$orderby=createdDateTime desc`);
     let items = (res.value||[]).map(normalize);
     // Zugriffsgrenze (UX; echte Grenze = SharePoint-Berechtigungen)
@@ -291,7 +306,9 @@ async function loadItems(force){
     if(!isAdmin()) items = items.filter(i => allowed.includes(i.werk));
     ITEMS = items;
     renderCurrentView();
+    if(force) toast('Aktualisiert ✓','success');
   }catch(e){ toast('Laden fehlgeschlagen: '+e.message,'error'); }
+  finally{ setLoading(false); }
 }
 
 // ── NAVIGATION ──────────────────────────────────────────────────────────────
@@ -569,6 +586,10 @@ async function submitNew(){
   })).filter(v=>v.name);
   if(!visitors.length){ toast('Mindestens eine Person mit Namen erfassen.','error'); return; }
 
+  // Dublettenwarnung: gleicher Name + Firma + Datum bereits vorhanden
+  const dups = visitors.filter(v=>findDuplicate(v.name, firma, datum)).map(v=>v.name);
+  if(dups.length && !confirm(`Für ${new Date(datum+'T00:00:00').toLocaleDateString('de-DE')} ist bereits eine Anmeldung vorhanden für: ${dups.join(', ')} (${firma}). Trotzdem speichern?`)) return;
+
   const sig = sigHasInk ? $id('sig').toDataURL('image/png') : '';
   const gruppenId = 'G'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
   const ankunftIso = $id('f-ankunft').value ? new Date(datum+'T'+$id('f-ankunft').value).toISOString() : null;
@@ -616,10 +637,19 @@ function visitorFieldPairs(v, c){
     ['Signatur', c.sig],
     ['Status', 'Angemeldet'],
     ['Bemerkungen', c.bemerk],
-    ['GruppenId', c.gruppenId]
+    ['GruppenId', c.gruppenId],
+    ['ErstellerUPN', myUPN()]
   ];
 }
 function pairsToFields(pairs){ const f={}; pairs.forEach(([k,v])=>putField(f,k,v)); return f; }
+// Findet einen bestehenden Datensatz mit gleichem Namen + Firma am selben Tag.
+function findDuplicate(name, firma, datum, exceptId){
+  const n=(name||'').trim().toLowerCase(), fi=(firma||'').trim().toLowerCase(), d=(datum||'').slice(0,10);
+  return ITEMS.find(i => i.id!==exceptId
+    && (i.besucherName||'').trim().toLowerCase()===n
+    && (i.firma||'').trim().toLowerCase()===fi
+    && (i.besuchsdatum||'').slice(0,10)===d);
+}
 
 // Bei 400: minimalen Datensatz anlegen und jedes Feld einzeln per PATCH testen,
 // um die von SharePoint abgelehnte(n) Spalte(n) exakt zu benennen. Danach aufräumen.
@@ -761,7 +791,7 @@ function renderCheckin(){
   // Nach Gruppe bündeln
   const groups = {};
   rel.forEach(i=>{ (groups[i.gruppenId||i.id] ||= []).push(i); });
-  body.innerHTML = Object.values(groups).map(g=>{
+  body.innerHTML = Object.entries(groups).map(([key,g])=>{
     const head = g[0];
     const rows = g.map(i=>{
       const act = canStamp()
@@ -775,12 +805,46 @@ function renderCheckin(){
         <div class="vc-actions"><button class="mini-btn" onclick="navigate('detail','${i.id}')">Details</button>${act}</div>
       </div>`;
     }).join('');
+    const nIn = g.filter(i=>i.status==='Angemeldet').length;
+    const nOut = g.filter(i=>i.status==='Eingecheckt').length;
+    const groupActs = (canStamp() && g.length>1) ? `<div style="display:flex;gap:6px;flex-wrap:wrap">
+      ${nIn>1 ? `<button class="btn btn-sm btn-success" onclick="checkGroup('in','${esc(key)}')">Alle einchecken (${nIn})</button>` : ''}
+      ${nOut>1 ? `<button class="btn btn-sm btn-outline" onclick="checkGroup('out','${esc(key)}')">Alle abmelden (${nOut})</button>` : ''}
+    </div>` : '';
     return `<div class="form-card" style="max-width:none;padding:16px 18px">
-      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px;margin-bottom:8px">
-        <div><b>${esc(head.firma||'–')}</b> ${werkBadge(head.werk)} · ${esc(head.bereich||'')}</div>
-        <div class="vc-sub">${fmtDate(head.besuchsdatum)} · Gastgeber: ${esc(head.ansprechName||'–')}</div>
+      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px;margin-bottom:8px;align-items:center">
+        <div><b>${esc(head.firma||'–')}</b> ${werkBadge(head.werk)} · ${esc(head.bereich||'')}
+          <span class="vc-sub" style="display:block">${fmtDate(head.besuchsdatum)} · Gastgeber: ${esc(head.ansprechName||'–')}</span></div>
+        ${groupActs}
       </div>${rows}</div>`;
   }).join('');
+}
+// Gruppen-Aktion: alle offenen Personen einer Besuchsgruppe ein-/auschecken.
+async function checkGroup(action, key){
+  if(!canStamp()){ toast('Keine Berechtigung zum Stempeln.','error'); return; }
+  const members = ITEMS.filter(i => (i.gruppenId||i.id)===key &&
+    (action==='in' ? i.status==='Angemeldet' : i.status==='Eingecheckt'));
+  if(!members.length) return;
+  let done=0;
+  for(const i of members){
+    if(action==='out' && (!i.werk||!i.bereich||!i.besucherName||!i.firma||!i.shb)) continue; // unvollständig überspringen
+    const fields={};
+    if(action==='in'){ putField(fields,'Eingangszeit',new Date().toISOString()); putField(fields,'Status','Eingecheckt'); }
+    else { putField(fields,'Abgangszeit',new Date().toISOString()); putField(fields,'Status','Geschlossen'); }
+    try{ await gPatch(`/sites/${siteId}/lists/${listId}/items/${i.id}/fields`, fields); done++; }
+    catch(e){ console.warn('checkGroup', e.message); }
+  }
+  toast(`${done} Person(en) ${action==='in'?'eingecheckt':'abgemeldet'} ✓`, 'success');
+  await loadItems();
+}
+
+// ── AUTO-AKTUALISIERUNG ─────────────────────────────────────────────────────
+let autoRefreshTimer = null;
+function toggleAutoRefresh(){
+  if(autoRefreshTimer){ clearInterval(autoRefreshTimer); autoRefreshTimer=null; }
+  else { autoRefreshTimer = setInterval(()=>{ if(document.visibilityState==='visible') loadItems(); }, 45000); }
+  const b=$id('btn-auto'); if(b){ b.textContent = autoRefreshTimer ? '⏱ Auto EIN' : '⏱ Auto AUS'; b.classList.toggle('btn-primary', !!autoRefreshTimer); b.classList.toggle('btn-ghost', !autoRefreshTimer); }
+  toast(autoRefreshTimer ? 'Auto-Aktualisierung an (alle 45 s)' : 'Auto-Aktualisierung aus','info');
 }
 
 // ── DATENSÄTZE ──────────────────────────────────────────────────────────────
@@ -804,11 +868,13 @@ function renderDetail(id){
       : (i.status==='Eingecheckt' ? `<button class="btn btn-sm btn-outline" onclick="checkOut('${i.id}')">Abmelden</button>` : '')) : '';
   const del = isAdmin() ? `<button class="btn btn-sm btn-danger" onclick="deleteItem('${i.id}')">Löschen</button>` : '';
   const tmpl = canCreate() ? `<button class="btn btn-sm btn-outline" onclick="useAsTemplate('${i.id}')">Als Vorlage</button>` : '';
+  const editB = canEditItem(i) ? `<button class="btn btn-sm btn-outline" onclick="openEditModal('${i.id}')">Bearbeiten</button>` : '';
   const invite = (canCreate() && i.email) ? `<button class="btn btn-sm btn-primary" onclick="sendInviteForItem('${i.id}')">✉ Einladung</button>` : '';
+  const beleg = `<button class="btn btn-sm btn-ghost" onclick="printBadge('${i.id}')">🖨 Beleg</button>`;
   const spUrl = `https://${SP_SITE.split(':/')[0]}/${SP_SITE.split(':/')[1]}/Lists/${encodeURIComponent(SP_LIST)}/AllItems.aspx`;
   host.innerHTML = `
     <div class="detail-head"><h2>${esc(i.besucherName)}</h2> ${werkBadge(i.werk)} ${statusBadge(i.status)}</div>
-    <div class="card-actions" style="margin-top:4px">${stamp} ${invite} ${tmpl} ${del}
+    <div class="card-actions" style="margin-top:4px">${stamp} ${editB} ${invite} ${beleg} ${tmpl} ${del}
       <a class="btn btn-sm btn-ghost" href="${spUrl}" target="_blank" rel="noopener">Versionsverlauf in SharePoint</a></div>
     <div class="detail-grid">
       ${row('Firma', esc(i.firma||'–'))}
@@ -834,6 +900,113 @@ async function deleteItem(id){
   if(!confirm('Diesen Datensatz endgültig löschen?')) return;
   try{ await gDelete(`/sites/${siteId}/lists/${listId}/items/${id}`); toast('Gelöscht.','success'); await loadItems(); navigate('records'); }
   catch(e){ toast('Löschen fehlgeschlagen: '+e.message,'error'); }
+}
+
+// ── BEARBEITEN ──────────────────────────────────────────────────────────────
+function openEditModal(id){
+  const i = ITEMS.find(x=>x.id===id);
+  if(!i){ toast('Datensatz nicht gefunden.','error'); return; }
+  if(!canEditItem(i)){ toast('Keine Berechtigung zum Bearbeiten.','error'); return; }
+  const werkOpts = allowedWerke().map(w=>`<option value="${esc(w)}" ${w===i.werk?'selected':''}>${esc(w)}</option>`).join('');
+  const zweckBoxes = BESUCHSZWECKE.map(z=>`<label><input type="checkbox" name="e-zweck" value="${esc(z)}" ${i.zweck.includes(z)?'checked':''}> ${esc(z)}</label>`).join('');
+  const psaBoxes = PSA_LISTE.map(p=>`<label><input type="checkbox" name="e-psa" value="${esc(p)}" ${i.psa.includes(p)?'checked':''}> ${esc(p)}</label>`).join('');
+  $id('modal-title').textContent = 'Anmeldung bearbeiten';
+  $id('modal-body').innerHTML = `
+    <div class="form-grid">
+      <div class="form-group"><label>Werk</label><select id="e-werk">${werkOpts}</select></div>
+      <div class="form-group"><label>Bereich</label><input id="e-bereich" value="${esc(i.bereich)}"></div>
+      <div class="form-group"><label>Besucher (Name)</label><input id="e-name" value="${esc(i.besucherName)}"></div>
+      <div class="form-group"><label>Firma</label><input id="e-firma" value="${esc(i.firma)}"></div>
+      <div class="form-group"><label>Ansprechpartner</label><input id="e-ansprech" value="${esc(i.ansprechName)}"></div>
+      <div class="form-group"><label>Telefon (Ansprechpartner)</label><input id="e-ansprechtel" value="${esc(i.ansprechTel)}"></div>
+      <div class="form-group"><label>Besuchsdatum</label><input id="e-datum" type="date" value="${esc((i.besuchsdatum||'').slice(0,10))}"></div>
+      <div class="form-group"><label>Funktion</label><input id="e-funktion" value="${esc(i.funktion)}"></div>
+      <div class="form-group"><label>Telefon</label><input id="e-tel" value="${esc(i.tel)}"></div>
+      <div class="form-group"><label>E-Mail</label><input id="e-email" value="${esc(i.email)}"></div>
+      <div class="form-group"><label>Autokennzeichen</label><input id="e-kennzeichen" value="${esc(i.kennzeichen)}"></div>
+    </div>
+    <div class="form-sub-h">Besuchszweck</div><div class="zweck-grid">${zweckBoxes}</div>
+    <div class="form-sub-h">PSA</div><div class="psa-grid">${psaBoxes}</div>
+    <div class="form-group full" style="margin-top:10px"><label>Bemerkungen</label><textarea id="e-bemerk" rows="2">${esc(i.bemerkungen)}</textarea></div>`;
+  $id('modal-footer').innerHTML = `<button class="btn btn-ghost" onclick="closeModal()">Abbrechen</button><button class="btn btn-primary" onclick="saveEdit('${i.id}')">Speichern</button>`;
+  $id('modal-overlay').classList.remove('hidden');
+}
+async function saveEdit(id){
+  const g = k => $id('e-'+k)?.value.trim();
+  const werk = g('werk');
+  if(!allowedWerke().includes(werk)){ toast('Keine Berechtigung für dieses Werk.','error'); return; }
+  const datum = g('datum');
+  const zweck = [...document.querySelectorAll('input[name="e-zweck"]:checked')].map(c=>c.value);
+  const psa   = [...document.querySelectorAll('input[name="e-psa"]:checked')].map(c=>c.value);
+  const dup = findDuplicate(g('name'), g('firma'), datum, id);
+  if(dup && !confirm('Es gibt bereits einen anderen Datensatz mit gleichem Namen/Firma an diesem Tag. Trotzdem speichern?')) return;
+  const fields = {};
+  putField(fields,'Werk', werk);
+  putField(fields,'Bereich', g('bereich'));
+  putField(fields,'BesucherName', g('name'));
+  putField(fields,'Firma', g('firma'));
+  putField(fields,'AnsprechName', g('ansprech'));
+  putField(fields,'AnsprechTel', g('ansprechtel'));
+  if(datum) putField(fields,'Besuchsdatum', new Date(datum+'T00:00:00').toISOString());
+  putField(fields,'Funktion', g('funktion'));
+  putField(fields,'BesucherTelefon', g('tel'));
+  putField(fields,'BesucherEmail', g('email'));
+  putField(fields,'Autokennzeichen', g('kennzeichen'));
+  putField(fields,'Besuchszweck', zweck);
+  putField(fields,'PSA', psa);
+  putField(fields,'Bemerkungen', g('bemerk'));
+  try{
+    await gPatch(`/sites/${siteId}/lists/${listId}/items/${id}/fields`, fields);
+    toast('Änderungen gespeichert ✓','success');
+    closeModal(); await loadItems(); navigate('detail', id);
+  }catch(e){ toast('Speichern fehlgeschlagen: '+e.message,'error'); }
+}
+
+// ── CHECK-IN-BELEG (Druck) ──────────────────────────────────────────────────
+function printBadge(id){
+  const i = ITEMS.find(x=>x.id===id);
+  if(!i){ toast('Datensatz nicht gefunden.','error'); return; }
+  const line=(l,v)=>`<tr><td style="color:#555;padding:2px 10px 2px 0">${esc(l)}</td><td style="font-weight:600">${esc(v||'–')}</td></tr>`;
+  $id('print-area').innerHTML = `
+    <div style="font-family:Arial,sans-serif;padding:16px;max-width:340px">
+      <div style="font-size:22px;font-weight:800;letter-spacing:.02em">BESUCHER</div>
+      <div style="font-size:12px;color:#666;margin-bottom:12px">DIHAG · ${esc(i.werk)}</div>
+      <div style="font-size:20px;font-weight:700;margin-bottom:10px">${esc(i.besucherName)}</div>
+      <table style="font-size:13px;border-collapse:collapse">
+        ${line('Firma', i.firma)}
+        ${line('Bereich', i.bereich)}
+        ${line('Gastgeber', i.ansprechName)}
+        ${line('Datum', fmtDate(i.besuchsdatum))}
+        ${line('Eingang', i.eingang?fmtTime(i.eingang):'–')}
+        ${i.psa.length?line('PSA', i.psa.join(', ')):''}
+      </table>
+      <div style="margin-top:14px;font-size:11px;color:#777">Sichtbar tragen · beim Verlassen am Empfang abgeben</div>
+    </div>`;
+  window.print();
+}
+
+// ── CSV-EXPORT (nur Vollberechtigte) ────────────────────────────────────────
+function buildCsv(list){
+  const cols = [['Werk','werk'],['Bereich','bereich'],['Besucher','besucherName'],['Firma','firma'],['Funktion','funktion'],
+    ['Telefon','tel'],['EMail','email'],['Kennzeichen','kennzeichen'],['Besuchsdatum','besuchsdatum'],
+    ['Eingang','eingang'],['Abgang','abgang'],['Status','status'],['Ansprechpartner','ansprechName']];
+  const cell = s => { s = (s==null?'':String(s)); return /[";\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s; };
+  const head = cols.map(c=>c[0]).concat('Besuchszweck','PSA').join(';');
+  const lines = list.map(i => cols.map(c=>cell(i[c[1]])).concat(cell((i.zweck||[]).join(', ')), cell((i.psa||[]).join(', '))).join(';'));
+  return '﻿' + [head, ...lines].join('\r\n');   // BOM für Excel
+}
+function exportCsv(){
+  if(!isFull()){ toast('Export ist nur für vollberechtigte Rollen.','error'); return; }
+  const q = ($id('search-dashboard')?.value||'').toLowerCase();
+  const status = $id('dash-status')?.value||'';
+  const werk = $id('dash-werk')?.value||'';
+  const list = ITEMS.filter(i => recordMatches(i, q, status, werk));
+  if(!list.length){ toast('Keine Datensätze zum Export.','info'); return; }
+  const url = URL.createObjectURL(new Blob([buildCsv(list)], {type:'text/csv;charset=utf-8'}));
+  const a = document.createElement('a');
+  a.href = url; a.download = `besucher_export_${todayStr()}.csv`;
+  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  toast(`${list.length} Datensätze exportiert. Enthält personenbezogene Daten – vertraulich behandeln.`,'success');
 }
 
 // ── REPORTS ─────────────────────────────────────────────────────────────────
@@ -894,6 +1067,8 @@ function renderAnleitung(){
         <li>Reiter <b>„Empfang / Check-in"</b> zeigt alle offenen Anmeldungen, nach Firma/Gruppe gebündelt.</li>
         <li><b>Einchecken</b> beim Eintreffen → setzt die Eingangszeit (Status „Eingecheckt“).</li>
         <li><b>Abmelden</b> beim Verlassen → setzt die Abgangszeit und <b>schließt</b> den Datensatz. Das geht nur, wenn die Pflichtfelder und die SHB-Bestätigung vorhanden sind.</li>
+        <li>Bei mehreren Personen einer Firma: <b>„Alle einchecken/abmelden"</b> erledigt die ganze Gruppe auf einmal.</li>
+        <li>Mit <b>⏱ Auto</b> (oben rechts) aktualisiert sich die Liste automatisch (alle 45 s).</li>
       </ul>`)}
 
     ${sect('5 · Einladung per E-Mail', `
@@ -905,12 +1080,15 @@ function renderAnleitung(){
       <ul>
         <li>Überblick mit Kennzahlen und <b>allen</b> Datensätzen deiner Werke – filterbar nach <b>Suche</b>, <b>Status</b> und <b>Werk</b>.</li>
         <li>Die Kachel <b>„Noch anwesend &gt; ${ANWESEND_WARN_STUNDEN} h"</b> und der rote <b>⚠-Hinweis</b> markieren Besucher, die eingecheckt, aber noch nicht abgemeldet sind – wichtig für Vollständigkeit/Evakuierung.</li>
+        <li><b>⬇ CSV</b> exportiert die aktuell gefilterten Datensätze (z. B. für Audits). Enthält personenbezogene Daten – vertraulich behandeln.</li>
       </ul>`)}
 
-    ${sect('7 · Eigene Datensätze &amp; Vorlagen', `
+    ${sect('7 · Datensätze bearbeiten, Vorlage &amp; Beleg', `
       <ul>
         <li>Reiter <b>„Eigene Datensätze"</b> zeigt die von dir selbst angelegten Anmeldungen.</li>
-        <li>Über <b>„Als Vorlage"</b> (in Detailansicht oder Karten) legst du eine neue Anmeldung aus einem bestehenden Datensatz an – ideal für wiederkehrende Besucher. Datum und Unterschrift bitte neu erfassen.</li>
+        <li>In der Detailansicht: <b>„Bearbeiten"</b> korrigiert Felder eines Datensatzes; <b>„🖨 Beleg"</b> druckt einen Besucherausweis.</li>
+        <li>Über <b>„Als Vorlage"</b> (Detailansicht oder Karten) legst du eine neue Anmeldung aus einem bestehenden Datensatz an – ideal für wiederkehrende Besucher. Datum und Unterschrift bitte neu erfassen.</li>
+        <li>Beim Anlegen warnt die App bei <b>Dubletten</b> (gleicher Name + Firma + Datum).</li>
       </ul>`)}
 
     ${admin ? sect('8 · Zugriffsverwaltung (Admin)', `

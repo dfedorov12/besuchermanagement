@@ -83,10 +83,12 @@
       <div class="topbar-right">
         <span class="role-badge" id="hdr-role" style="display:none"></span>
         <button class="btn btn-sm btn-ghost" onclick="loadItems(true)" title="Aktualisieren" id="btn-reload">Aktualisieren</button>
+        <button class="btn btn-sm btn-ghost" onclick="toggleAutoRefresh()" title="Automatisch aktualisieren" id="btn-auto">⏱ Auto AUS</button>
         <button class="btn btn-sm btn-ghost" onclick="openSettings()" title="Einstellungen">⚙️</button>
       </div>
     </header>
 
+    <div id="loadbar" style="display:none"></div>
     <div id="col-warning" class="col-warning" style="display:none"></div>
 
     <div class="content" id="content">
@@ -108,6 +110,7 @@
           <select id="dash-werk" class="sort-select" onchange="renderDashboard()">
             <option value="">Alle Werke</option>
           </select>
+          <button class="btn btn-sm btn-outline" onclick="exportCsv()" title="Gefilterte Datensätze als CSV exportieren">⬇ CSV</button>
         </div>
         <div id="dash-list"></div>
       </div>
@@ -187,6 +190,7 @@
 </div>
 
 <div id="toast-c"></div>
+<div id="print-area"></div>
 
 <script src="app.js"></script>
 </body>
