@@ -1029,7 +1029,7 @@ function renderAnleitung(){
   const roleLbl = admin ? 'Administrator' : (ROLLEN[myRole()] || '–');
   const sect = (title, body) => `<div class="help-sec"><h3>${title}</h3>${body}</div>`;
   const fullOnly = full
-    ? `<span class="help-tag ok">für dich verfügbar</span>`
+    ? `<span class="help-tag ok">für Sie verfügbar</span>`
     : `<span class="help-tag">nur für vollberechtigte Rollen</span>`;
 
   const html = `
@@ -1048,7 +1048,7 @@ function renderAnleitung(){
         <li><b>Wachschutz / Sekretariat</b> – vollberechtigt: zusätzlich <b>Dashboard</b> (alle Datensätze) und <b>Reports</b>.</li>
         <li><b>Administrator</b> – zusätzlich <b>Zugriffsverwaltung</b> (Rollen &amp; Werke vergeben).</li>
       </ul>
-      <p>Der Zugriff ist zusätzlich je <b>Werk</b> begrenzt. Die vollständige Rechteübersicht findest du unter
+      <p>Der Zugriff ist zusätzlich je <b>Werk</b> begrenzt. Die vollständige Rechteübersicht finden Sie unter
       <button class="link-btn" onclick="openSettings()">⚙️ Einstellungen → Rechtemodell</button>.</p>`)}
 
     ${sect('3 · Neue Anmeldung anlegen', `
@@ -1058,7 +1058,7 @@ function renderAnleitung(){
         <li>Besucher eintragen; mit <b>„+ weitere Person (gleiche Firma)"</b> mehrere Personen ergänzen. Optionale Felder (Telefon, E-Mail, Kennzeichen) nur bei Bedarf.</li>
         <li><b>Besuchszweck</b> und ausgegebene <b>PSA</b> ankreuzen.</li>
         <li><b>Sicherheitshinweise SHB akzeptiert</b> anhaken und im Feld <b>digital unterschreiben</b> (Maus/Finger).</li>
-        <li><b>Speichern</b> – danach kannst du sofort eine Einladung senden (siehe 5).</li>
+        <li><b>Speichern</b> – danach können Sie sofort eine Einladung senden (siehe 5).</li>
       </ol>
       <p class="help-note">Tipp: Datensätze am besten <b>vorab</b> erzeugen, damit der Empfang beim Eintreffen nur noch eincheckt.</p>`)}
 
@@ -1072,40 +1072,40 @@ function renderAnleitung(){
       </ul>`)}
 
     ${sect('5 · Einladung per E-Mail', `
-      <p>Nach dem Speichern (oder später in der Detailansicht über <b>„✉ Einladung"</b>) sendest du dem Besucher eine
+      <p>Nach dem Speichern (oder später in der Detailansicht über <b>„✉ Einladung"</b>) senden Sie dem Besucher eine
       Einladung mit Termin und Sicherheitshinweis – <b>direkt aus der App</b>, ohne Outlook.</p>
       <p class="help-note">Beim <b>ersten</b> Versand fragt Microsoft einmalig nach der Berechtigung „E-Mail senden“. Bitte zustimmen und Popups für die App-Adresse erlauben.</p>`)}
 
     ${sect(`6 · Dashboard ${fullOnly}`, `
       <ul>
-        <li>Überblick mit Kennzahlen und <b>allen</b> Datensätzen deiner Werke – filterbar nach <b>Suche</b>, <b>Status</b> und <b>Werk</b>.</li>
+        <li>Überblick mit Kennzahlen und <b>allen</b> Datensätzen Ihrer Werke – filterbar nach <b>Suche</b>, <b>Status</b> und <b>Werk</b>.</li>
         <li>Die Kachel <b>„Noch anwesend &gt; ${ANWESEND_WARN_STUNDEN} h"</b> und der rote <b>⚠-Hinweis</b> markieren Besucher, die eingecheckt, aber noch nicht abgemeldet sind – wichtig für Vollständigkeit/Evakuierung.</li>
         <li><b>⬇ CSV</b> exportiert die aktuell gefilterten Datensätze (z. B. für Audits). Enthält personenbezogene Daten – vertraulich behandeln.</li>
       </ul>`)}
 
     ${sect('7 · Datensätze bearbeiten, Vorlage &amp; Beleg', `
       <ul>
-        <li>Reiter <b>„Eigene Datensätze"</b> zeigt die von dir selbst angelegten Anmeldungen.</li>
+        <li>Reiter <b>„Eigene Datensätze"</b> zeigt die von Ihnen selbst angelegten Anmeldungen.</li>
         <li>In der Detailansicht: <b>„Bearbeiten"</b> korrigiert Felder eines Datensatzes; <b>„🖨 Beleg"</b> druckt einen Besucherausweis.</li>
-        <li>Über <b>„Als Vorlage"</b> (Detailansicht oder Karten) legst du eine neue Anmeldung aus einem bestehenden Datensatz an – ideal für wiederkehrende Besucher. Datum und Unterschrift bitte neu erfassen.</li>
+        <li>Über <b>„Als Vorlage"</b> (Detailansicht oder Karten) legen Sie eine neue Anmeldung aus einem bestehenden Datensatz an – ideal für wiederkehrende Besucher. Datum und Unterschrift bitte neu erfassen.</li>
         <li>Beim Anlegen warnt die App bei <b>Dubletten</b> (gleicher Name + Firma + Datum).</li>
       </ul>`)}
 
     ${admin ? sect('8 · Zugriffsverwaltung (Admin)', `
       <p>Unter <button class="link-btn" onclick="openSettings()">⚙️ Einstellungen</button> → <b>Zugriffsverwaltung</b>:
       E-Mail/UPN hinzufügen, <b>Rolle</b> wählen und <b>Werke</b> freigeben. Neue Nutzer starten als SHB-Verantwortlicher.
-      Warte nach dem Eintragen auf die Meldung <b>„Zugriffsrechte gespeichert ✓"</b>.</p>` ) : ''}
+      Warten Sie nach dem Eintragen auf die Meldung <b>„Zugriffsrechte gespeichert ✓"</b>.</p>` ) : ''}
 
     ${sect(`${admin?'9':'8'} · Datenschutz`, `
       <ul>
         <li>Verarbeitung nur zur Werks-/Besuchersicherheit und zum Nachweis der Unterweisung; Zugriff nach Bedarf je Werk.</li>
         <li><b>90 Tage</b> Aufbewahrung, danach automatische Löschung.</li>
-        <li>Den <b>Datenschutzhinweis</b> (Aushang Empfang) findest du unter <button class="link-btn" onclick="showPrivacyNotice()">⚙️ Einstellungen → Datenschutzhinweis</button>.</li>
+        <li>Den <b>Datenschutzhinweis</b> (Aushang Empfang) finden Sie unter <button class="link-btn" onclick="showPrivacyNotice()">⚙️ Einstellungen → Datenschutzhinweis</button>.</li>
       </ul>`)}
 
     ${sect(`${admin?'10':'9'} · Wenn etwas hakt`, `
       <ul>
-        <li><b>„Kein Zugriff"</b> → der Administrator muss dich (Werk + Rolle) freischalten. Die Meldung zeigt die genaue Ursache.</li>
+        <li><b>„Kein Zugriff"</b> → der Administrator muss Sie (Werk + Rolle) freischalten. Die Meldung zeigt die genaue Ursache.</li>
         <li><b>Gelbes Banner „fehlende Spalten"</b> → in der SharePoint-Liste fehlen Spalten (Administrator).</li>
         <li><b>„Speichern abgelehnt – Diagnose"</b> → die App nennt die betroffene Spalte und den erwarteten Typ.</li>
       </ul>`)}
