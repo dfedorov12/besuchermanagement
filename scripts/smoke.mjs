@@ -26,6 +26,7 @@ const COLS = ['Title','Werk','Bereich','AnsprechpartnerName','AnsprechpartnerTel
 const COLSET = new Set(COLS);
 
 const posts = [];           // erfasste POST-Bodies (fields)
+const patches = [];         // erfasste PATCH-Bodies (fields)
 const sentMail = [];        // erfasste /me/sendMail-Bodies
 let sentUnknownColumn = false;
 
@@ -53,6 +54,7 @@ async function fakeFetch(url, opts) {
   }
   if (method === 'PATCH') {
     const fields = JSON.parse(opts.body || '{}');
+    patches.push(fields);
     for (const k of Object.keys(fields)) { if (k.includes('@')) continue;
       if (!COLSET.has(k)) { sentUnknownColumn = true; return resp({ error:{ message:'bad' } }, 400); } }
     return resp({ id: 'patched' });
@@ -62,7 +64,11 @@ async function fakeFetch(url, opts) {
   if (u.includes('/lists/Besucheranmeldung')) return resp({ id:'listid', displayName:'Besucheranmeldung' });
   if (u.includes('/lists/listid/columns')) return resp({ value: COLS.map(n => ({ name:n, displayName:n })) });
   if (u.includes('/lists?$select=id,displayName')) return resp({ value: [] });  // keine Config-Liste
-  if (u.includes('/lists/listid/items')) return resp({ value: [] });            // items GET
+  // items GET: ein Datensatz OHNE SHB (für „SHB nachträglich")
+  if (u.includes('/lists/listid/items')) return resp({ value: [
+    { id:'rec1', createdDateTime:new Date().toISOString(), createdBy:{ user:{ email:'administrator@dihag.com', displayName:'Administrator' } },
+      fields:{ Title:'Erika Ohne SHB', Werk:'SHB', Bereich:'Tor 2', Firma:'Beta AG', Status:'Angemeldet', SHBAkzeptiert:false } }
+  ] });
   return resp({});
 }
 
@@ -97,7 +103,7 @@ async function main() {
 
   // app.js in der Fensterrealität ausführen + Test-Handles exportieren
   let src = readFileSync(join(root, 'app.js'), 'utf8');
-  src += `\n;window.__app = { submitNew, navigate, applyTemplate, sendSavedInvite, isOverdue, buildCsv, canEditItem, findDuplicate, get HAVE(){return HAVE}, get C(){return C}, WERKE, get account(){return account}, isFull, canSeeDashboard, canSeeReports, isMine };`;
+  src += `\n;window.__app = { submitNew, navigate, applyTemplate, sendSavedInvite, isOverdue, buildCsv, canEditItem, findDuplicate, setNewMode, openSHBModal, saveSHB, shbActive, get HAVE(){return HAVE}, get C(){return C}, WERKE, get account(){return account}, isFull, canSeeDashboard, canSeeReports, isMine };`;
   w.eval(src);
 
   // Auf Boot warten (discoverSP füllt HAVE)
@@ -115,6 +121,13 @@ async function main() {
   w.__app.navigate('new');
   await sleep(10);
   const doc = w.document;
+  // Modus-Umschaltung (Voranmeldung vs. vor Ort)
+  w.__app.setNewMode('voranmeldung');
+  ok(doc.getElementById('ankunft-group').style.display !== 'none', 'Voranmeldung: Ankunftszeit sichtbar');
+  ok(doc.getElementById('shb-section').style.display === 'none', 'Voranmeldung: SHB ausgeblendet');
+  w.__app.setNewMode('vorort');
+  ok(doc.getElementById('ankunft-group').style.display === 'none', 'Vor Ort: Ankunftszeit ausgeblendet');
+  ok(doc.getElementById('shb-section').style.display !== 'none', 'Vor Ort: SHB sichtbar');
   const set = (id, v) => { const el = doc.getElementById(id); el.value = v; };
   set('f-werk', 'SHB'); set('f-bereich', 'Halle 3'); set('f-firma', 'ACME GmbH');
   doc.querySelector('#visitors [data-f="name"]').value = 'Max Mustermann';
@@ -147,6 +160,8 @@ async function main() {
   ok(!('BesucherTelefon' in f), 'Fehlende Spalte BesucherTelefon NICHT gesendet');
   ok(f.ErstellerUPN === 'administrator@dihag.com', 'ErstellerUPN beim Anlegen gesetzt');
   ok(w.__app.isMine({ creatorUPN:'administrator@dihag.com' }) === true, 'isMine über ErstellerUPN');
+  ok(f.SHBAkzeptiert === true, 'Vor-Ort: SHB akzeptiert gesetzt');
+  ok(typeof f.Signatur === 'string' && f.Signatur.startsWith('data:image'), 'Vor-Ort: Unterschrift gespeichert');
   ok(Object.keys(f).every(k => k.includes('@') || COLSET.has(k)), 'Alle gesendeten Felder existieren als Spalte');
   ok(Array.isArray(f.Besuchszweck) && f.Besuchszweck.join(',') === 'Audit', 'Besuchszweck als Array gesendet');
   ok(f['Besuchszweck@odata.type'] === 'Collection(Edm.String)', 'Multi-Choice Besuchszweck mit @odata.type annotiert');
@@ -181,6 +196,22 @@ async function main() {
   ok(csv.includes('"Halle;3"') && csv.includes('"Max ""M"""'), 'CSV: Sonderzeichen korrekt maskiert');
   ok(w.__app.canEditItem({}) === true, 'Admin darf bearbeiten');
   ok(w.__app.findDuplicate('Niemand','Nirgends','2026-07-09') === undefined, 'Dublettenprüfung ohne Treffer');
+
+  // SHB nachträglich (Schritt 2) auf einen Datensatz ohne SHB (rec1)
+  w.__app.openSHBModal('rec1');
+  await sleep(5);
+  doc.getElementById('shb-ok').checked = true;
+  const sm = doc.getElementById('sig-modal');
+  sm.dispatchEvent(new w.MouseEvent('mousedown', { clientX:2, clientY:2 }));
+  sm.dispatchEvent(new w.MouseEvent('mousemove', { clientX:6, clientY:6 }));
+  w.dispatchEvent(new w.MouseEvent('mouseup', {}));
+  const before = patches.length;
+  await w.__app.saveSHB('rec1');
+  await sleep(5);
+  const lastPatch = patches[patches.length-1] || {};
+  ok(patches.length > before && lastPatch.SHBAkzeptiert === true, 'SHB nachträglich: SHBAkzeptiert gesetzt');
+  ok(typeof lastPatch.Signatur === 'string' && lastPatch.Signatur.startsWith('data:image'), 'SHB nachträglich: Unterschrift gespeichert');
+  ok(w.__app.shbActive() === true, 'SHB standardmäßig aktiv');
 
   // Anleitung-Reiter
   w.__app.navigate('anleitung');

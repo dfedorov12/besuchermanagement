@@ -76,8 +76,9 @@ Falls der Name abweicht: `SP_SITE` in `app.js` und in den Workflow-Variablen anp
 | `Title` | Einzeltext (ein Element mit Wert `access`) |
 | `ConfigValue` | Mehrere Textzeilen (hält JSON) |
 
-Die App legt das `access`-Element selbst an; die **Liste** muss manuell existieren.
-Admins (`administrator@dihag.com`, `fedorov@dihag.com`) pflegen in der App unter ⚙️ pro Person **Rolle + freigegebene Werke**.
+Die App legt das `access`-Element selbst an; die **Liste** muss manuell existieren. Der JSON-Inhalt hält
+`users` (Rollen/Werke je UPN) **und** `settings` (u. a. `shbActive` – Sicherheitsunterweisung global an/aus).
+Admin (`administrator@dihag.com`) pflegt in der App unter ⚙️ **Rolle + freigegebene Werke** und die **SHB-Einstellung**.
 
 **Rollen:**
 - `verantwortlicher` – legt Anmeldungen an und sieht **nur eigene** Datensätze; kein Dashboard, keine Reports.

@@ -48,6 +48,9 @@ let currentView = 'dashboard';
 let newVisitorSeq = 0;
 let templateItem = null;   // Datensatz, dessen Werte in „Neue Anmeldung" vorbefüllt werden
 let lastSaved = null;      // zuletzt gespeicherte Anmeldung (für Einladungs-Versand)
+let newMode = 'voranmeldung';         // 'voranmeldung' (ohne SHB) | 'vorort' (mit SHB)
+let appSettings = { shbActive: true };// globale App-Einstellungen (aus BESU_Konfiguration)
+function shbActive(){ return appSettings.shbActive !== false; }
 
 // ── DOM-HELFER ──────────────────────────────────────────────────────────────
 const $id = id => document.getElementById(id);
@@ -225,7 +228,7 @@ async function _findConfigList(){
 // 'ok' | 'no-list' (Liste fehlt/nicht sichtbar) | 'read-failed' (keine Leseberechtigung) | 'parse-failed'
 let accessLoadState = 'unknown';
 async function loadAccessConfig(){
-  accessUsers={}; accessConfigItemId=null; accessListId=null; accessLoadState='unknown';
+  accessUsers={}; accessConfigItemId=null; accessListId=null; accessLoadState='unknown'; appSettings={ shbActive:true };
   try{
     if(!siteId){ accessLoadState='no-list'; return; }
     const lid = await _findConfigList();
@@ -236,9 +239,11 @@ async function loadAccessConfig(){
     const item = (res.value||[]).find(it => (it.fields?.Title||'')===ACCESS_ITEM_TITLE);
     if(item){
       accessConfigItemId = item.id;
-      let raw = {};
-      try{ raw = JSON.parse(_decodeSpText(item.fields?.ConfigValue)||'{}').users||{}; }
+      let parsed = {};
+      try{ parsed = JSON.parse(_decodeSpText(item.fields?.ConfigValue)||'{}'); }
       catch(e){ accessLoadState='parse-failed'; console.warn('[Zugriff] JSON-Fehler:', e.message); return; }
+      const raw = parsed.users||{};
+      appSettings = Object.assign({ shbActive:true }, parsed.settings||{});
       // Schlüssel klein schreiben (robuster Abgleich mit den Nutzer-Identitäten)
       Object.keys(raw).forEach(u=>{ const v=raw[u]||{}; accessUsers[String(u).trim().toLowerCase()]={ role:v.role||'verantwortlicher', werke:Array.isArray(v.werke)?v.werke:[] }; });
     }
@@ -246,11 +251,11 @@ async function loadAccessConfig(){
   }catch(e){ accessLoadState='read-failed'; console.warn('[Zugriff]', e.message); }
 }
 async function saveAccessConfig(){
-  if(!isAdmin()){ toast('Nur Administrator darf Zugriffsrechte ändern.','error'); return; }
+  if(!isAdmin()){ toast('Nur Administrator darf Einstellungen ändern.','error'); return; }
   try{
     const lid = await _findConfigList();
     if(!lid){ toast("Liste '"+ACCESS_LIST_NAME+"' nicht gefunden – siehe SETUP.md.",'error'); return; }
-    const fields = { Title: ACCESS_ITEM_TITLE, ConfigValue: JSON.stringify({ users: accessUsers }) };
+    const fields = { Title: ACCESS_ITEM_TITLE, ConfigValue: JSON.stringify({ users: accessUsers, settings: appSettings }) };
     if (accessConfigItemId) await gPatch(`/sites/${siteId}/lists/${lid}/items/${accessConfigItemId}/fields`, fields);
     else { const cr = await gPost(`/sites/${siteId}/lists/${lid}/items`, { fields }); accessConfigItemId = cr.id; }
     toast('Zugriffsrechte gespeichert ✓','success');
@@ -377,7 +382,7 @@ function renderDashboard(){
     <div class="stat-card on-site"><div class="stat-num">${onSite.length}</div><div class="stat-lbl">Aktuell anwesend</div></div>
     <div class="stat-card overdue"><div class="stat-num">${overdue.length}</div><div class="stat-lbl">Noch anwesend &gt; ${ANWESEND_WARN_STUNDEN} h</div></div>
     <div class="stat-card today"><div class="stat-num">${todayReg.length}</div><div class="stat-lbl">Anmeldungen heute</div></div>
-    <div class="stat-card"><div class="stat-num">${closedToday.length}</div><div class="stat-lbl">Heute abgemeldet</div></div>
+    <div class="stat-card"><div class="stat-num">${closedToday.length}</div><div class="stat-lbl">Heute ausgecheckt</div></div>
     <div class="stat-card"><div class="stat-num">${ITEMS.length}</div><div class="stat-lbl">Datensätze gesamt</div></div>`;
 
   const q = ($id('search-dashboard')?.value||'').toLowerCase();
@@ -396,14 +401,14 @@ function recordMatches(i, q, status, werk){
 }
 function recordCard(i){
   const stamp = canStamp() ? (i.status==='Angemeldet'
-      ? `<button class="btn btn-sm btn-success" onclick="event.stopPropagation();checkIn('${i.id}')">Einchecken</button>`
-      : (i.status==='Eingecheckt' ? `<button class="btn btn-sm btn-outline" onclick="event.stopPropagation();checkOut('${i.id}')">Abmelden</button>` : '')) : '';
+      ? `<button class="btn btn-sm btn-success" onclick="event.stopPropagation();checkIn('${i.id}')">CheckIn</button>`
+      : (i.status==='Eingecheckt' ? `<button class="btn btn-sm btn-outline" onclick="event.stopPropagation();checkOut('${i.id}')">CheckOut</button>` : '')) : '';
   const over = isOverdue(i);
-  const warn = over ? `<span class="warn-chip" title="Noch nicht abgemeldet">⚠ ${Math.floor(hoursSince(i.eingang))} h anwesend</span>` : '';
+  const warn = over ? `<span class="warn-chip" title="Noch nicht ausgecheckt">⚠ ${Math.floor(hoursSince(i.eingang))} h anwesend</span>` : '';
   return `<div class="visitor-card${over?' overdue':''}" style="cursor:pointer" onclick="navigate('detail','${i.id}')">
     <div class="vc-main">
       <div class="vc-name">${esc(i.besucherName)} ${werkBadge(i.werk)} ${statusBadge(i.status)} ${warn}</div>
-      <div class="vc-sub">${esc(i.firma||'–')} · ${esc(i.bereich||'')} · ${fmtDate(i.besuchsdatum)} · Ein ${fmtTime(i.eingang)} / Ab ${fmtTime(i.abgang)}</div>
+      <div class="vc-sub">${esc(i.firma||'–')} · ${esc(i.bereich||'')} · ${fmtDate(i.besuchsdatum)} · CheckIn ${fmtTime(i.eingang)} / CheckOut ${fmtTime(i.abgang)}</div>
     </div>
     <div class="vc-actions">${stamp}${canCreate()?`<button class="mini-btn" onclick="event.stopPropagation();useAsTemplate('${i.id}')">Vorlage</button>`:''}<span class="mini-btn">Öffnen →</span></div>
   </div>`;
@@ -419,14 +424,20 @@ function renderNewForm(){
   host.innerHTML = `
   <div class="form-card">
     <h2>Neue Besucheranmeldung</h2>
-    <div class="fc-sub">Vom besuchten Bereich auszufüllen. Datensatz möglichst vorab erzeugen.</div>
+    <div class="fc-sub">Art der Anmeldung wählen:</div>
+    <div class="radio-cards" style="margin-bottom:16px">
+      <label class="radio-card"><input type="radio" name="anmode" value="voranmeldung" onchange="setNewMode('voranmeldung')">
+        <span class="rc-title">Voranmeldung</span><span class="rc-desc">Vorab, ohne Unterweisung. Die Sicherheitsunterweisung erfolgt später am Empfang (Schritt 2).</span></label>
+      <label class="radio-card"><input type="radio" name="anmode" value="vorort" onchange="setNewMode('vorort')">
+        <span class="rc-title">Anmeldung vor Ort</span><span class="rc-desc">Besucher ist da und unterschreibt die Sicherheitsunterweisung jetzt.</span></label>
+    </div>
     <div class="form-grid">
       <div class="form-group"><label>Werk <span class="req">*</span></label><select id="f-werk">${werkOpts}</select></div>
       <div class="form-group"><label>Bereich <span class="req">*</span></label><input id="f-bereich" type="text"></div>
       <div class="form-group"><label>Ansprechpartner im Werk <span class="req">*</span></label><input id="f-ansprech" type="text" value="${esc(account?.name||'')}"></div>
       <div class="form-group"><label>Telefon (Ansprechpartner)</label><input id="f-ansprechtel" type="text"></div>
       <div class="form-group"><label>Besuchsdatum <span class="req">*</span></label><input id="f-datum" type="date" value="${todayStr()}"></div>
-      <div class="form-group"><label>Ankunftszeit (geplant)</label><input id="f-ankunft" type="time"></div>
+      <div class="form-group" id="ankunft-group"><label>Ankunftszeit (geplant)</label><input id="f-ankunft" type="time"></div>
       <div class="form-group full"><label>Firma <span class="req">*</span></label><input id="f-firma" type="text"><div class="field-sub">Gilt für alle Personen dieser Anmeldung.</div></div>
     </div>
 
@@ -437,12 +448,14 @@ function renderNewForm(){
     <div id="visitors"></div>
     <button class="btn btn-sm btn-outline" onclick="addVisitorRow()">+ weitere Person (gleiche Firma)</button>
 
-    <div class="form-sub-h">Sicherheitsunterweisung (SHB)</div>
-    <label style="display:flex;align-items:center;gap:8px;font-size:.88rem"><input type="checkbox" id="f-shb"> Sicherheitshinweise SHB akzeptiert</label>
-    <div id="sig-block" style="margin-top:10px;display:none">
-      <div class="field-sub" style="margin-bottom:4px">Digitale Unterschrift</div>
-      <div class="sig-wrap"><canvas id="sig" class="sig-canvas" width="420" height="150"></canvas></div>
-      <div class="sig-actions"><button class="mini-btn" onclick="clearSig()">Löschen</button></div>
+    <div id="shb-section">
+      <div class="form-sub-h">Sicherheitsunterweisung (SHB)</div>
+      <label style="display:flex;align-items:center;gap:8px;font-size:.88rem"><input type="checkbox" id="f-shb"> Sicherheitshinweise SHB akzeptiert</label>
+      <div id="sig-block" style="margin-top:10px;display:none">
+        <div class="field-sub" style="margin-bottom:4px">Digitale Unterschrift</div>
+        <div class="sig-wrap"><canvas id="sig" class="sig-canvas" width="420" height="150"></canvas></div>
+        <div class="sig-actions"><button class="mini-btn" onclick="clearSig()">Löschen</button></div>
+      </div>
     </div>
 
     <div class="form-group full" style="margin-top:14px"><label>Bemerkungen</label><textarea id="f-bemerk" rows="2"></textarea></div>
@@ -459,9 +472,17 @@ function renderNewForm(){
     </div>
   </div>`;
   addVisitorRow(true);
-  setupSignature();
+  newSigPad = makeSigPad($id('sig'));
   $id('f-shb').addEventListener('change', e=>{ $id('sig-block').style.display = e.target.checked ? 'block' : 'none'; });
+  document.querySelector(`input[name="anmode"][value="${newMode}"]`).checked = true;
+  updateModeUI();
   if (templateItem){ applyTemplate(templateItem); templateItem = null; }
+}
+function setNewMode(m){ newMode = m; updateModeUI(); }
+function updateModeUI(){
+  const vor = newMode==='voranmeldung';
+  const ank = $id('ankunft-group'); if(ank) ank.style.display = vor ? '' : 'none';           // geplante Ankunftszeit nur bei Voranmeldung
+  const shb = $id('shb-section');   if(shb) shb.style.display = (!vor && shbActive()) ? '' : 'none'; // SHB nur „vor Ort" und wenn aktiv
 }
 function goHome(){ navigate(canSeeDashboard() ? 'dashboard' : 'records'); }
 
@@ -515,19 +536,22 @@ function addVisitorRow(first){
   $id('visitors').appendChild(div);
 }
 
-// Signatur (Canvas)
-let sigCtx=null, sigDrawing=false, sigHasInk=false;
-function setupSignature(){
-  const cv = $id('sig'); if(!cv) return;
-  sigCtx = cv.getContext('2d'); sigCtx.lineWidth=2; sigCtx.lineCap='round'; sigCtx.strokeStyle='#1e2939'; sigHasInk=false;
+// Signatur-Pad (wiederverwendbar für Neue Anmeldung und „SHB nachträglich").
+function makeSigPad(cv){
+  if(!cv) return null;
+  const ctx = cv.getContext('2d'); if(!ctx) return null;
+  ctx.lineWidth=2; ctx.lineCap='round'; ctx.strokeStyle='#1e2939';
+  let drawing=false, hasInk=false;
   const pos = e => { const r=cv.getBoundingClientRect(); const p=(e.touches?e.touches[0]:e); return { x:(p.clientX-r.left)*(cv.width/r.width), y:(p.clientY-r.top)*(cv.height/r.height) }; };
-  const start = e => { sigDrawing=true; const {x,y}=pos(e); sigCtx.beginPath(); sigCtx.moveTo(x,y); e.preventDefault(); };
-  const move  = e => { if(!sigDrawing) return; const {x,y}=pos(e); sigCtx.lineTo(x,y); sigCtx.stroke(); sigHasInk=true; e.preventDefault(); };
-  const end   = () => { sigDrawing=false; };
+  const start = e => { drawing=true; const {x,y}=pos(e); ctx.beginPath(); ctx.moveTo(x,y); e.preventDefault(); };
+  const move  = e => { if(!drawing) return; const {x,y}=pos(e); ctx.lineTo(x,y); ctx.stroke(); hasInk=true; e.preventDefault(); };
+  const end   = () => { drawing=false; };
   cv.addEventListener('mousedown',start); cv.addEventListener('mousemove',move); window.addEventListener('mouseup',end);
   cv.addEventListener('touchstart',start,{passive:false}); cv.addEventListener('touchmove',move,{passive:false}); cv.addEventListener('touchend',end);
+  return { clear(){ ctx.clearRect(0,0,cv.width,cv.height); hasInk=false; }, hasInk:()=>hasInk, dataUrl:()=>cv.toDataURL('image/png') };
 }
-function clearSig(){ const cv=$id('sig'); if(cv&&sigCtx){ sigCtx.clearRect(0,0,cv.width,cv.height); sigHasInk=false; } }
+let newSigPad = null;
+function clearSig(){ newSigPad?.clear(); }
 
 // Setzt ein Feld nur, wenn die Spalte existiert und der Wert nicht leer ist.
 // Verhindert Graph-400 „Invalid request" durch nicht vorhandene Spalten.
@@ -569,12 +593,14 @@ async function submitNew(){
   const ansprech = $id('f-ansprech').value.trim();
   const datum = $id('f-datum').value;
   const firma = $id('f-firma').value.trim();
-  const shb = $id('f-shb').checked;
+  // SHB nur bei „vor Ort" und wenn global aktiv erforderlich; bei Voranmeldung später (Schritt 2)
+  const shbRequired = shbActive() && newMode==='vorort';
+  const shb = shbRequired && $id('f-shb').checked;
   if(!werk || !bereich || !ansprech || !datum || !firma){ toast('Bitte Pflichtfelder (Werk, Bereich, Ansprechpartner, Datum, Firma) ausfüllen.','error'); return; }
   if(!allowedWerke().includes(werk)){ toast('Keine Berechtigung für dieses Werk.','error'); return; }
   const zweck = [...document.querySelectorAll('input[name="zweck"]:checked')].map(c=>c.value);
-  if(!shb){ toast('Sicherheitsunterweisung (SHB) muss bestätigt werden.','error'); return; }
-  if(shb && !sigHasInk){ toast('Bitte digital unterschreiben (SHB-Bestätigung).','error'); return; }
+  if(shbRequired && !$id('f-shb').checked){ toast('Sicherheitsunterweisung (SHB) muss bestätigt werden.','error'); return; }
+  if(shbRequired && !newSigPad?.hasInk()){ toast('Bitte digital unterschreiben (SHB-Bestätigung).','error'); return; }
   const rows = [...document.querySelectorAll('#visitors .visitor-row')];
   const visitors = rows.map(r=>({
     name: r.querySelector('[data-f="name"]').value.trim(),
@@ -590,13 +616,14 @@ async function submitNew(){
   const dups = visitors.filter(v=>findDuplicate(v.name, firma, datum)).map(v=>v.name);
   if(dups.length && !confirm(`Für ${new Date(datum+'T00:00:00').toLocaleDateString('de-DE')} ist bereits eine Anmeldung vorhanden für: ${dups.join(', ')} (${firma}). Trotzdem speichern?`)) return;
 
-  const sig = sigHasInk ? $id('sig').toDataURL('image/png') : '';
+  const sig = shb && newSigPad?.hasInk() ? newSigPad.dataUrl() : '';
   const gruppenId = 'G'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
-  const ankunftIso = $id('f-ankunft').value ? new Date(datum+'T'+$id('f-ankunft').value).toISOString() : null;
+  // Geplante Ankunftszeit nur bei Voranmeldung (vor Ort nicht benötigt)
+  const ankunftIso = (newMode==='voranmeldung' && $id('f-ankunft').value) ? new Date(datum+'T'+$id('f-ankunft').value).toISOString() : null;
 
   const ansprechTel = $id('f-ansprechtel').value.trim();
   const bemerk = $id('f-bemerk').value.trim();
-  const common = { werk, bereich, ansprech, ansprechTel, datum, ankunftIso, firma, zweck, sig, bemerk, gruppenId };
+  const common = { werk, bereich, ansprech, ansprechTel, datum, ankunftIso, firma, zweck, sig, shb, bemerk, gruppenId };
   const btn = event?.target; if(btn){ btn.disabled=true; btn.textContent='Speichert …'; }
   const created = [];
   try{
@@ -633,7 +660,7 @@ function visitorFieldPairs(v, c){
     ['Autokennzeichen', v.kennzeichen],
     ['Besuchszweck', c.zweck],
     ['PSA', v.psa],
-    ['SHBAkzeptiert', true],
+    ['SHBAkzeptiert', !!c.shb],
     ['Signatur', c.sig],
     ['Status', 'Angemeldet'],
     ['Bemerkungen', c.bemerk],
@@ -764,21 +791,27 @@ async function sendAllSavedInvites(){ if(!lastSaved) return; for(const v of last
 // ── CHECK-IN / CHECK-OUT ────────────────────────────────────────────────────
 async function checkIn(id){
   if(!canStamp()){ toast('Keine Berechtigung zum Stempeln.','error'); return; }
+  const it = ITEMS.find(i=>i.id===id);
+  // Vor dem CheckIn muss die SHB vorliegen (wenn aktiv) → sonst Unterweisung nachholen
+  if(it && shbActive() && !it.shb){
+    if(confirm('Für diesen Besucher liegt noch keine Sicherheitsunterweisung vor. Jetzt nachholen?')) openSHBModal(id);
+    return;
+  }
   const fields={}; putField(fields,'Eingangszeit',new Date().toISOString()); putField(fields,'Status','Eingecheckt');
   try{ await gPatch(`/sites/${siteId}/lists/${listId}/items/${id}/fields`, fields);
-    toast('Eingecheckt ✓','success'); await loadItems(); }
+    toast('CheckIn ✓','success'); await loadItems(); }
   catch(e){ toast('Fehler: '+e.message,'error'); }
 }
 async function checkOut(id){
   if(!canStamp()){ toast('Keine Berechtigung zum Stempeln.','error'); return; }
   const it = ITEMS.find(i=>i.id===id);
-  // Schließbedingung: Pflichtfelder vorhanden
-  if(it && (!it.werk || !it.bereich || !it.besucherName || !it.firma || !it.shb)){
-    toast('Datensatz unvollständig – kann nicht geschlossen werden (Pflichtfelder/SHB).','error'); return;
+  // Schließbedingung: Pflichtfelder vorhanden (SHB nur wenn aktiv)
+  if(it && (!it.werk || !it.bereich || !it.besucherName || !it.firma || (shbActive() && !it.shb))){
+    toast('Datensatz unvollständig – CheckOut nicht möglich (Pflichtfelder/SHB).','error'); return;
   }
   const fields={}; putField(fields,'Abgangszeit',new Date().toISOString()); putField(fields,'Status','Geschlossen');
   try{ await gPatch(`/sites/${siteId}/lists/${listId}/items/${id}/fields`, fields);
-    toast('Abgemeldet & geschlossen ✓','success'); await loadItems(); }
+    toast('Ausgecheckt & geschlossen ✓','success'); await loadItems(); }
   catch(e){ toast('Fehler: '+e.message,'error'); }
 }
 
@@ -794,22 +827,24 @@ function renderCheckin(){
   body.innerHTML = Object.entries(groups).map(([key,g])=>{
     const head = g[0];
     const rows = g.map(i=>{
+      const needsShb = shbActive() && !i.shb;
+      const shbBtn = (canStamp() && needsShb) ? `<button class="btn btn-sm btn-warn" onclick="openSHBModal('${i.id}')">Sicherheitsunterweisung</button>` : '';
       const act = canStamp()
         ? (i.status==='Angemeldet'
-            ? `<button class="btn btn-sm btn-success" onclick="checkIn('${i.id}')">Einchecken</button>`
-            : `<button class="btn btn-sm btn-outline" onclick="checkOut('${i.id}')">Abmelden</button>`)
+            ? `<button class="btn btn-sm btn-success" onclick="checkIn('${i.id}')">CheckIn</button>`
+            : `<button class="btn btn-sm btn-outline" onclick="checkOut('${i.id}')">CheckOut</button>`)
         : '';
       return `<div class="visitor-card">
-        <div class="vc-main"><div class="vc-name">${esc(i.besucherName)} ${statusBadge(i.status)}</div>
-          <div class="vc-sub">${i.eingang?('Eingang '+fmtTime(i.eingang)) : 'noch nicht eingecheckt'}${i.psa.length?(' · PSA: '+i.psa.map(esc).join(', ')):''}</div></div>
-        <div class="vc-actions"><button class="mini-btn" onclick="navigate('detail','${i.id}')">Details</button>${act}</div>
+        <div class="vc-main"><div class="vc-name">${esc(i.besucherName)} ${statusBadge(i.status)}${needsShb?' <span class="warn-chip">SHB offen</span>':''}</div>
+          <div class="vc-sub">${i.eingang?('CheckIn '+fmtTime(i.eingang)) : 'noch kein CheckIn'}${i.psa.length?(' · PSA: '+i.psa.map(esc).join(', ')):''}</div></div>
+        <div class="vc-actions"><button class="mini-btn" onclick="navigate('detail','${i.id}')">Details</button>${shbBtn}${act}</div>
       </div>`;
     }).join('');
     const nIn = g.filter(i=>i.status==='Angemeldet').length;
     const nOut = g.filter(i=>i.status==='Eingecheckt').length;
     const groupActs = (canStamp() && g.length>1) ? `<div style="display:flex;gap:6px;flex-wrap:wrap">
-      ${nIn>1 ? `<button class="btn btn-sm btn-success" onclick="checkGroup('in','${esc(key)}')">Alle einchecken (${nIn})</button>` : ''}
-      ${nOut>1 ? `<button class="btn btn-sm btn-outline" onclick="checkGroup('out','${esc(key)}')">Alle abmelden (${nOut})</button>` : ''}
+      ${nIn>1 ? `<button class="btn btn-sm btn-success" onclick="checkGroup('in','${esc(key)}')">Alle CheckIn (${nIn})</button>` : ''}
+      ${nOut>1 ? `<button class="btn btn-sm btn-outline" onclick="checkGroup('out','${esc(key)}')">Alle CheckOut (${nOut})</button>` : ''}
     </div>` : '';
     return `<div class="form-card" style="max-width:none;padding:16px 18px">
       <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px;margin-bottom:8px;align-items:center">
@@ -825,16 +860,17 @@ async function checkGroup(action, key){
   const members = ITEMS.filter(i => (i.gruppenId||i.id)===key &&
     (action==='in' ? i.status==='Angemeldet' : i.status==='Eingecheckt'));
   if(!members.length) return;
-  let done=0;
+  let done=0, skipped=0;
   for(const i of members){
-    if(action==='out' && (!i.werk||!i.bereich||!i.besucherName||!i.firma||!i.shb)) continue; // unvollständig überspringen
+    if(shbActive() && !i.shb){ skipped++; continue; }   // ohne SHB weder ein- noch auschecken
+    if(action==='out' && (!i.werk||!i.bereich||!i.besucherName||!i.firma)){ skipped++; continue; }
     const fields={};
     if(action==='in'){ putField(fields,'Eingangszeit',new Date().toISOString()); putField(fields,'Status','Eingecheckt'); }
     else { putField(fields,'Abgangszeit',new Date().toISOString()); putField(fields,'Status','Geschlossen'); }
     try{ await gPatch(`/sites/${siteId}/lists/${listId}/items/${i.id}/fields`, fields); done++; }
     catch(e){ console.warn('checkGroup', e.message); }
   }
-  toast(`${done} Person(en) ${action==='in'?'eingecheckt':'abgemeldet'} ✓`, 'success');
+  toast(`${done} Person(en) ${action==='in'?'eingecheckt':'ausgecheckt'}${skipped?` · ${skipped} ohne SHB übersprungen`:''} ✓`, 'success');
   await loadItems();
 }
 
@@ -845,6 +881,35 @@ function toggleAutoRefresh(){
   else { autoRefreshTimer = setInterval(()=>{ if(document.visibilityState==='visible') loadItems(); }, 45000); }
   const b=$id('btn-auto'); if(b){ b.textContent = autoRefreshTimer ? '⏱ Auto EIN' : '⏱ Auto AUS'; b.classList.toggle('btn-primary', !!autoRefreshTimer); b.classList.toggle('btn-ghost', !autoRefreshTimer); }
   toast(autoRefreshTimer ? 'Auto-Aktualisierung an (alle 45 s)' : 'Auto-Aktualisierung aus','info');
+}
+
+// ── SICHERHEITSUNTERWEISUNG NACHHOLEN (Schritt 2) ───────────────────────────
+let shbSigPad = null;
+function openSHBModal(id){
+  const i = ITEMS.find(x=>x.id===id);
+  if(!i){ toast('Datensatz nicht gefunden.','error'); return; }
+  if(!canStamp()){ toast('Keine Berechtigung.','error'); return; }
+  $id('modal-title').textContent = 'Sicherheitsunterweisung – ' + i.besucherName;
+  $id('modal-body').innerHTML = `
+    <p style="font-size:.86rem;color:#374151;margin-bottom:8px">Sicherheitshinweise (SHB) mit dem Besucher durchgehen und bestätigen lassen.</p>
+    <label style="display:flex;align-items:center;gap:8px;font-size:.88rem;margin-bottom:10px"><input type="checkbox" id="shb-ok"> Sicherheitshinweise SHB akzeptiert</label>
+    <div class="field-sub" style="margin-bottom:4px">Digitale Unterschrift</div>
+    <div class="sig-wrap"><canvas id="sig-modal" class="sig-canvas" width="420" height="150"></canvas></div>
+    <div class="sig-actions"><button class="mini-btn" onclick="shbSigPad && shbSigPad.clear()">Löschen</button></div>`;
+  $id('modal-footer').innerHTML = `<button class="btn btn-ghost" onclick="closeModal()">Abbrechen</button><button class="btn btn-primary" onclick="saveSHB('${id}')">Bestätigen</button>`;
+  $id('modal-overlay').classList.remove('hidden');
+  shbSigPad = makeSigPad($id('sig-modal'));
+}
+async function saveSHB(id){
+  if(!$id('shb-ok')?.checked){ toast('Bitte „SHB akzeptiert" bestätigen.','error'); return; }
+  if(!shbSigPad?.hasInk()){ toast('Bitte digital unterschreiben.','error'); return; }
+  const fields={}; putField(fields,'SHBAkzeptiert', true); putField(fields,'Signatur', shbSigPad.dataUrl());
+  try{
+    await gPatch(`/sites/${siteId}/lists/${listId}/items/${id}/fields`, fields);
+    toast('Sicherheitsunterweisung erfasst ✓','success');
+    closeModal(); await loadItems();
+    if(currentView==='detail') navigate('detail', id);
+  }catch(e){ toast('Speichern fehlgeschlagen: '+e.message,'error'); }
 }
 
 // ── DATENSÄTZE ──────────────────────────────────────────────────────────────
@@ -864,8 +929,9 @@ function renderDetail(id){
   if(!i){ host.innerHTML = `<div class="empty-state">Datensatz nicht gefunden.</div>`; return; }
   const row=(l,v)=>`<div class="dl">${esc(l)}</div><div class="dv">${v}</div>`;
   const stamp = canStamp() ? (i.status==='Angemeldet'
-      ? `<button class="btn btn-sm btn-success" onclick="checkIn('${i.id}')">Einchecken</button>`
-      : (i.status==='Eingecheckt' ? `<button class="btn btn-sm btn-outline" onclick="checkOut('${i.id}')">Abmelden</button>` : '')) : '';
+      ? `<button class="btn btn-sm btn-success" onclick="checkIn('${i.id}')">CheckIn</button>`
+      : (i.status==='Eingecheckt' ? `<button class="btn btn-sm btn-outline" onclick="checkOut('${i.id}')">CheckOut</button>` : '')) : '';
+  const shbB = (canStamp() && shbActive() && !i.shb) ? `<button class="btn btn-sm btn-warn" onclick="openSHBModal('${i.id}')">Sicherheitsunterweisung</button>` : '';
   const del = isAdmin() ? `<button class="btn btn-sm btn-danger" onclick="deleteItem('${i.id}')">Löschen</button>` : '';
   const tmpl = canCreate() ? `<button class="btn btn-sm btn-outline" onclick="useAsTemplate('${i.id}')">Als Vorlage</button>` : '';
   const editB = canEditItem(i) ? `<button class="btn btn-sm btn-outline" onclick="openEditModal('${i.id}')">Bearbeiten</button>` : '';
@@ -873,8 +939,8 @@ function renderDetail(id){
   const beleg = `<button class="btn btn-sm btn-ghost" onclick="printBadge('${i.id}')">🖨 Beleg</button>`;
   const spUrl = `https://${SP_SITE.split(':/')[0]}/${SP_SITE.split(':/')[1]}/Lists/${encodeURIComponent(SP_LIST)}/AllItems.aspx`;
   host.innerHTML = `
-    <div class="detail-head"><h2>${esc(i.besucherName)}</h2> ${werkBadge(i.werk)} ${statusBadge(i.status)}</div>
-    <div class="card-actions" style="margin-top:4px">${stamp} ${editB} ${invite} ${beleg} ${tmpl} ${del}
+    <div class="detail-head"><h2>${esc(i.besucherName)}</h2> ${werkBadge(i.werk)} ${statusBadge(i.status)}${(shbActive()&&!i.shb)?' <span class="warn-chip">SHB offen</span>':''}</div>
+    <div class="card-actions" style="margin-top:4px">${shbB} ${stamp} ${editB} ${invite} ${beleg} ${tmpl} ${del}
       <a class="btn btn-sm btn-ghost" href="${spUrl}" target="_blank" rel="noopener">Versionsverlauf in SharePoint</a></div>
     <div class="detail-grid">
       ${row('Firma', esc(i.firma||'–'))}
@@ -1052,22 +1118,25 @@ function renderAnleitung(){
       <button class="link-btn" onclick="openSettings()">⚙️ Einstellungen → Rechtemodell</button>.</p>`)}
 
     ${sect('3 · Neue Anmeldung anlegen', `
+      <p>Oben die <b>Art</b> wählen:</p>
+      <ul>
+        <li><b>Voranmeldung</b> – vorab, <b>ohne</b> Sicherheitsunterweisung. Die geplante <b>Ankunftszeit</b> kann angegeben werden. Die SHB folgt später am Empfang (Schritt 2).</li>
+        <li><b>Anmeldung vor Ort</b> – der Besucher ist da und unterschreibt die <b>Sicherheitsunterweisung sofort</b>. Eine geplante Ankunftszeit entfällt.</li>
+      </ul>
       <ol>
-        <li>Reiter <b>„Neue Anmeldung"</b> öffnen.</li>
         <li><b>Werk</b>, <b>Bereich</b>, <b>Ansprechpartner</b> (Gastgeber), <b>Datum</b> und <b>Firma</b> ausfüllen (Pflichtfelder mit <span class="req">*</span>).</li>
-        <li>Besucher eintragen; mit <b>„+ weitere Person (gleiche Firma)"</b> mehrere Personen ergänzen. Optionale Felder (Telefon, E-Mail, Kennzeichen) nur bei Bedarf.</li>
+        <li>Besucher eintragen; mit <b>„+ weitere Person (gleiche Firma)"</b> mehrere Personen ergänzen. Optionale Felder nur bei Bedarf.</li>
         <li><b>Besuchszweck</b> und ausgegebene <b>PSA</b> ankreuzen.</li>
-        <li><b>Sicherheitshinweise SHB akzeptiert</b> anhaken und im Feld <b>digital unterschreiben</b> (Maus/Finger).</li>
+        <li>Bei „vor Ort": <b>SHB akzeptiert</b> anhaken und <b>digital unterschreiben</b> (Maus/Finger).</li>
         <li><b>Speichern</b> – danach können Sie sofort eine Einladung senden (siehe 5).</li>
-      </ol>
-      <p class="help-note">Tipp: Datensätze am besten <b>vorab</b> erzeugen, damit der Empfang beim Eintreffen nur noch eincheckt.</p>`)}
+      </ol>`)}
 
-    ${sect('4 · Empfang / Check-in', `
+    ${sect('4 · Empfang / CheckIn &amp; CheckOut', `
       <ul>
         <li>Reiter <b>„Empfang / Check-in"</b> zeigt alle offenen Anmeldungen, nach Firma/Gruppe gebündelt.</li>
-        <li><b>Einchecken</b> beim Eintreffen → setzt die Eingangszeit (Status „Eingecheckt“).</li>
-        <li><b>Abmelden</b> beim Verlassen → setzt die Abgangszeit und <b>schließt</b> den Datensatz. Das geht nur, wenn die Pflichtfelder und die SHB-Bestätigung vorhanden sind.</li>
-        <li>Bei mehreren Personen einer Firma: <b>„Alle einchecken/abmelden"</b> erledigt die ganze Gruppe auf einmal.</li>
+        <li><b>CheckIn</b> beim Eintreffen setzt die Eingangszeit. Fehlt bei einer Voranmeldung noch die SHB, öffnet sich zuerst die <b>Sicherheitsunterweisung</b> (Schritt 2) – bestätigen und unterschreiben lassen.</li>
+        <li><b>CheckOut</b> beim Verlassen setzt die Abgangszeit und <b>schließt</b> den Datensatz (nur mit vollständigen Pflichtfeldern / SHB).</li>
+        <li>Bei mehreren Personen einer Firma: <b>„Alle CheckIn / Alle CheckOut"</b> erledigt die Gruppe auf einmal.</li>
         <li>Mit <b>⏱ Auto</b> (oben rechts) aktualisiert sich die Liste automatisch (alle 45 s).</li>
       </ul>`)}
 
@@ -1079,7 +1148,7 @@ function renderAnleitung(){
     ${sect(`6 · Dashboard ${fullOnly}`, `
       <ul>
         <li>Überblick mit Kennzahlen und <b>allen</b> Datensätzen Ihrer Werke – filterbar nach <b>Suche</b>, <b>Status</b> und <b>Werk</b>.</li>
-        <li>Die Kachel <b>„Noch anwesend &gt; ${ANWESEND_WARN_STUNDEN} h"</b> und der rote <b>⚠-Hinweis</b> markieren Besucher, die eingecheckt, aber noch nicht abgemeldet sind – wichtig für Vollständigkeit/Evakuierung.</li>
+        <li>Die Kachel <b>„Noch anwesend &gt; ${ANWESEND_WARN_STUNDEN} h"</b> und der rote <b>⚠-Hinweis</b> markieren Besucher, die eingecheckt, aber noch nicht ausgecheckt sind – wichtig für Vollständigkeit/Evakuierung.</li>
         <li><b>⬇ CSV</b> exportiert die aktuell gefilterten Datensätze (z. B. für Audits). Enthält personenbezogene Daten – vertraulich behandeln.</li>
       </ul>`)}
 
@@ -1094,7 +1163,8 @@ function renderAnleitung(){
     ${admin ? sect('8 · Zugriffsverwaltung (Admin)', `
       <p>Unter <button class="link-btn" onclick="openSettings()">⚙️ Einstellungen</button> → <b>Zugriffsverwaltung</b>:
       E-Mail/UPN hinzufügen, <b>Rolle</b> wählen und <b>Werke</b> freigeben. Neue Nutzer starten als SHB-Verantwortlicher.
-      Warten Sie nach dem Eintragen auf die Meldung <b>„Zugriffsrechte gespeichert ✓"</b>.</p>` ) : ''}
+      Warten Sie nach dem Eintragen auf die Meldung <b>„gespeichert ✓"</b>. Dort lässt sich auch die
+      <b>Sicherheitsunterweisung global aktivieren/deaktivieren</b>.</p>` ) : ''}
 
     ${sect(`${admin?'9':'8'} · Datenschutz`, `
       <ul>
@@ -1171,8 +1241,15 @@ function openSettings(){
       </div>`).join('') || '<p class="su-empty" style="color:#9ca3af;font-size:.85rem">Noch keine Nutzer freigegeben.</p>';
     adminBlock = `
       <hr class="modal-hr">
+      <div class="settings-section-title">🖊 Sicherheitsunterweisung</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;font-size:.88rem;margin-bottom:4px">
+        <span>Digitale Unterschrift / SHB aktiv</span>
+        <label class="tgl-wrap"><input type="checkbox" ${shbActive()?'checked':''} onchange="setShbActive(this.checked)"><span class="tgl"></span></label>
+      </div>
+      <p class="field-sub" style="margin-bottom:4px">Ist die SHB deaktiviert, entfällt Unterschrift/Bestätigung beim Anlegen und beim CheckIn/CheckOut.</p>
+      <hr class="modal-hr">
       <div class="settings-section-title">🔐 Zugriffsverwaltung (Werk + Rolle)</div>
-      <p class="field-sub" style="margin-bottom:8px">Lege pro Person Rolle und freigegebene Werke fest. Als Administrator hast du immer Zugriff auf alle Werke.</p>
+      <p class="field-sub" style="margin-bottom:8px">Rolle und freigegebene Werke je Person festlegen. Als Administrator haben Sie immer Zugriff auf alle Werke.</p>
       <div class="su-add" style="display:flex;gap:8px;margin-bottom:12px">
         <input type="email" id="access-new-upn" placeholder="name@dihag.com" class="su-input">
         <button class="btn btn-sm btn-primary" onclick="addAccessUser()">+ Hinzufügen</button>
@@ -1191,6 +1268,7 @@ function addAccessUser(){
 }
 function removeAccessUser(upn){ delete accessUsers[(upn||'').trim().toLowerCase()]; saveAccessConfig(); openSettings(); }
 function setRole(upn,role){ upn=(upn||'').toLowerCase(); if(accessUsers[upn]){ accessUsers[upn].role=role; saveAccessConfig(); } }
+function setShbActive(on){ if(!isAdmin()) return; appSettings.shbActive = !!on; saveAccessConfig(); }
 function toggleWerk(upn,werk,on){ upn=(upn||'').toLowerCase(); if(!accessUsers[upn]) return; const s=new Set(accessUsers[upn].werke); on?s.add(werk):s.delete(werk); accessUsers[upn].werke=[...s]; saveAccessConfig(); }
 
 function showPrivacyNotice(){
