@@ -110,6 +110,12 @@
           <select id="dash-werk" class="sort-select" onchange="renderDashboard()">
             <option value="">Alle Werke</option>
           </select>
+          <select id="dash-date" class="sort-select" onchange="renderDashboard()">
+            <option value="">Alle Tage</option>
+            <option value="today">Heute</option>
+            <option value="week">Diese Woche</option>
+          </select>
+          <button class="btn btn-sm btn-outline" onclick="printAttendance()" title="Aktuell anwesende Besucher drucken (Evakuierung)">🖨 Anwesenheitsliste</button>
           <button class="btn btn-sm btn-outline" onclick="exportCsv()" title="Gefilterte Datensätze als CSV exportieren">⬇ CSV</button>
         </div>
         <div id="dash-list"></div>
@@ -125,6 +131,11 @@
             <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd"/></svg>
             <input type="text" id="search-checkin" placeholder="Suchen …" oninput="renderCheckin()"/>
           </div>
+          <select id="checkin-date" class="sort-select" onchange="renderCheckin()">
+            <option value="today">Heute</option>
+            <option value="week">Diese Woche</option>
+            <option value="">Alle Tage</option>
+          </select>
         </div>
         <div id="checkin-body"></div>
       </div>
@@ -141,6 +152,11 @@
             <option value="Angemeldet">Angemeldet</option>
             <option value="Eingecheckt">Eingecheckt</option>
             <option value="Geschlossen">Geschlossen</option>
+          </select>
+          <select id="rec-date" class="sort-select" onchange="renderRecords()">
+            <option value="">Alle Tage</option>
+            <option value="today">Heute</option>
+            <option value="week">Diese Woche</option>
           </select>
         </div>
         <div id="records-body"></div>

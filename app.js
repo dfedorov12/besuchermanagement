@@ -368,6 +368,19 @@ function fmtTime(iso){ if(!iso) return '–'; const d=new Date(iso); return isNa
 function hoursSince(iso){ const d=new Date(iso); return isNaN(d)?0:(Date.now()-d.getTime())/3600000; }
 // „Noch anwesend": eingecheckt und seit > ANWESEND_WARN_STUNDEN nicht abgemeldet.
 function isOverdue(i){ return i.status==='Eingecheckt' && !!i.eingang && hoursSince(i.eingang) >= ANWESEND_WARN_STUNDEN; }
+// Datums-Bereich (Besuchsdatum): '' = alle, 'today', 'week' (Mo–So der laufenden Woche)
+function inDateScope(iso, scope){
+  if(!scope) return true;
+  const d = (iso||'').slice(0,10); if(!d) return false;
+  if(scope==='today') return d===todayStr();
+  if(scope==='week'){
+    const now=new Date(); const off=(now.getDay()+6)%7;                 // Mo=0
+    const mon=new Date(now); mon.setDate(now.getDate()-off);
+    const sun=new Date(mon); sun.setDate(mon.getDate()+6);
+    return d>=mon.toISOString().slice(0,10) && d<=sun.toISOString().slice(0,10);
+  }
+  return true;
+}
 
 function statusBadge(s){ const cls={'Angemeldet':'status-angemeldet','Eingecheckt':'status-eingecheckt','Geschlossen':'status-geschlossen'}[s]||'status-angemeldet'; return `<span class="status-badge ${cls}">${esc(s)}</span>`; }
 function werkBadge(w){ return `<span class="werk-badge">${esc(w||'?')}</span>`; }
@@ -388,14 +401,16 @@ function renderDashboard(){
   const q = ($id('search-dashboard')?.value||'').toLowerCase();
   const status = $id('dash-status')?.value||'';
   const werk = $id('dash-werk')?.value||'';
-  const list = ITEMS.filter(i => recordMatches(i, q, status, werk));
+  const scope = $id('dash-date')?.value||'';
+  const list = ITEMS.filter(i => recordMatches(i, q, status, werk, scope));
   const body = $id('dash-list');
   body.innerHTML = list.length ? list.map(recordCard).join('') : `<div class="empty-state">Keine Datensätze für diesen Filter.</div>`;
 }
 // Gemeinsame Filter-/Karten-Helfer für Dashboard und Eigene Datensätze
-function recordMatches(i, q, status, werk){
+function recordMatches(i, q, status, werk, scope){
   if (status && i.status !== status) return false;
   if (werk && i.werk !== werk) return false;
+  if (scope && !inDateScope(i.besuchsdatum, scope)) return false;
   if (q && !((i.besucherName+' '+i.firma+' '+i.werk+' '+i.bereich+' '+i.kennzeichen+' '+i.ansprechName).toLowerCase().includes(q))) return false;
   return true;
 }
@@ -421,7 +436,13 @@ function renderNewForm(){
   newVisitorSeq = 0;
   const werkOpts = allowedWerke().map(w=>`<option value="${esc(w)}">${esc(w)}</option>`).join('');
   const zweckBoxes = BESUCHSZWECKE.map(z=>`<label><input type="checkbox" name="zweck" value="${esc(z)}"> ${esc(z)}</label>`).join('');
+  // Autocomplete aus früheren Besuchen (Namen/Firmen)
+  const distinct = key => [...new Set(ITEMS.map(i=>i[key]).filter(Boolean))].sort((a,b)=>a.localeCompare(b)).slice(0,500);
+  const dlNames = distinct('besucherName').map(n=>`<option value="${esc(n)}"></option>`).join('');
+  const dlFirms = distinct('firma').map(n=>`<option value="${esc(n)}"></option>`).join('');
   host.innerHTML = `
+  <datalist id="dl-names">${dlNames}</datalist>
+  <datalist id="dl-firma">${dlFirms}</datalist>
   <div class="form-card">
     <h2>Neue Besucheranmeldung</h2>
     <div class="fc-sub">Art der Anmeldung wählen:</div>
@@ -438,7 +459,7 @@ function renderNewForm(){
       <div class="form-group"><label>Telefon (Ansprechpartner)</label><input id="f-ansprechtel" type="text"></div>
       <div class="form-group"><label>Besuchsdatum <span class="req">*</span></label><input id="f-datum" type="date" value="${todayStr()}"></div>
       <div class="form-group" id="ankunft-group"><label>Ankunftszeit (geplant)</label><input id="f-ankunft" type="time"></div>
-      <div class="form-group full"><label>Firma <span class="req">*</span></label><input id="f-firma" type="text"><div class="field-sub">Gilt für alle Personen dieser Anmeldung.</div></div>
+      <div class="form-group full"><label>Firma <span class="req">*</span></label><input id="f-firma" type="text" list="dl-firma" autocomplete="off"><div class="field-sub">Gilt für alle Personen dieser Anmeldung.</div></div>
     </div>
 
     <div class="form-sub-h">Besuchszweck</div>
@@ -525,7 +546,7 @@ function addVisitorRow(first){
       ${first?'' : `<button class="vr-del" onclick="this.closest('.visitor-row').remove()" title="Entfernen">✕</button>`}
     </div>
     <div class="form-grid">
-      <div class="form-group"><label>Name, Vorname <span class="req">*</span></label><input type="text" data-f="name"></div>
+      <div class="form-group"><label>Name, Vorname <span class="req">*</span></label><input type="text" data-f="name" list="dl-names" autocomplete="off"></div>
       <div class="form-group"><label>Funktion</label><input type="text" data-f="funktion"></div>
       <div class="form-group"><label>Telefon</label><input type="text" data-f="tel"></div>
       <div class="form-group"><label>E-Mail</label><input type="email" data-f="email"></div>
@@ -817,7 +838,9 @@ async function checkOut(id){
 
 function renderCheckin(){
   const q = ($id('search-checkin')?.value||'').toLowerCase();
+  const scope = $id('checkin-date') ? $id('checkin-date').value : 'today';
   const rel = ITEMS.filter(i => i.status!=='Geschlossen')
+    .filter(i => inDateScope(i.besuchsdatum, scope))
     .filter(i => !q || (i.besucherName+' '+i.firma+' '+i.werk).toLowerCase().includes(q));
   const body = $id('checkin-body');
   if(!rel.length){ body.innerHTML = `<div class="empty-state">Keine offenen Anmeldungen.</div>`; return; }
@@ -916,7 +939,8 @@ async function saveSHB(id){
 function renderRecords(){
   const q = ($id('search-records')?.value||'').toLowerCase();
   const sf = $id('filter-status')?.value||'';
-  const list = ITEMS.filter(isMine).filter(i => recordMatches(i, q, sf, ''));
+  const scope = $id('rec-date')?.value||'';
+  const list = ITEMS.filter(isMine).filter(i => recordMatches(i, q, sf, '', scope));
   const body = $id('records-body');
   if(!list.length){ body.innerHTML = `<div class="empty-state">Noch keine eigenen Datensätze – lege unter „Neue Anmeldung" welche an.</div>`; return; }
   body.innerHTML = list.map(recordCard).join('');
@@ -1051,7 +1075,40 @@ function printBadge(id){
   window.print();
 }
 
+// ── ANWESENHEITSLISTE (Evakuierung) ─────────────────────────────────────────
+function printAttendance(){
+  const list = ITEMS.filter(i => i.status==='Eingecheckt')
+    .sort((a,b)=>(a.werk+a.besucherName).localeCompare(b.werk+b.besucherName));
+  const byWerk = {};
+  list.forEach(i=>{ (byWerk[i.werk||'–'] ||= []).push(i); });
+  const now = new Date().toLocaleString('de-DE');
+  const th = t => `<th style="text-align:left;border-bottom:1px solid #000;padding:2px 6px">${t}</th>`;
+  const td = v => `<td style="padding:2px 6px;border-bottom:1px solid #ddd">${esc(v||'–')}</td>`;
+  const sections = Object.entries(byWerk).map(([w,arr])=>`
+    <div style="margin-top:12px">
+      <div style="font-weight:700;font-size:14px">${esc(w)} — ${arr.length} anwesend</div>
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <tr>${th('Name')}${th('Firma')}${th('Bereich')}${th('Gastgeber')}${th('CheckIn')}</tr>
+        ${arr.map(i=>`<tr>${td(i.besucherName)}${td(i.firma)}${td(i.bereich)}${td(i.ansprechName)}${td(fmtTime(i.eingang))}</tr>`).join('')}
+      </table>
+    </div>`).join('');
+  $id('print-area').innerHTML = `
+    <div style="font-family:Arial,sans-serif;padding:16px">
+      <div style="font-size:20px;font-weight:800">Anwesenheitsliste – aktuell auf dem Gelände</div>
+      <div style="font-size:12px;color:#555;margin-bottom:6px">DIHAG · Stand ${now} · ${list.length} Person(en)${isFull()?'':''}</div>
+      ${sections || '<p style="font-size:13px">Aktuell niemand eingecheckt.</p>'}
+      <div style="margin-top:20px;font-size:11px;color:#777">Für Evakuierung/Vollständigkeitskontrolle. Vertraulich behandeln.</div>
+    </div>`;
+  window.print();
+}
+
 // ── CSV-EXPORT (nur Vollberechtigte) ────────────────────────────────────────
+function downloadCsv(csv, filename){
+  const url = URL.createObjectURL(new Blob([csv], {type:'text/csv;charset=utf-8'}));
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+}
 function buildCsv(list){
   const cols = [['Werk','werk'],['Bereich','bereich'],['Besucher','besucherName'],['Firma','firma'],['Funktion','funktion'],
     ['Telefon','tel'],['EMail','email'],['Kennzeichen','kennzeichen'],['Besuchsdatum','besuchsdatum'],
@@ -1066,13 +1123,41 @@ function exportCsv(){
   const q = ($id('search-dashboard')?.value||'').toLowerCase();
   const status = $id('dash-status')?.value||'';
   const werk = $id('dash-werk')?.value||'';
-  const list = ITEMS.filter(i => recordMatches(i, q, status, werk));
+  const scope = $id('dash-date')?.value||'';
+  const list = ITEMS.filter(i => recordMatches(i, q, status, werk, scope));
   if(!list.length){ toast('Keine Datensätze zum Export.','info'); return; }
-  const url = URL.createObjectURL(new Blob([buildCsv(list)], {type:'text/csv;charset=utf-8'}));
-  const a = document.createElement('a');
-  a.href = url; a.download = `besucher_export_${todayStr()}.csv`;
-  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  downloadCsv(buildCsv(list), `besucher_export_${todayStr()}.csv`);
   toast(`${list.length} Datensätze exportiert. Enthält personenbezogene Daten – vertraulich behandeln.`,'success');
+}
+// ── DSGVO: Betroffenenrechte (Admin) ────────────────────────────────────────
+let dsgvoResults = [];
+function dsgvoFind(){
+  const q = ($id('dsgvo-q')?.value||'').trim().toLowerCase();
+  const res = $id('dsgvo-res'); if(!res) return;
+  if(!q){ res.innerHTML=''; dsgvoResults=[]; return; }
+  dsgvoResults = ITEMS.filter(i => (i.besucherName||'').toLowerCase().includes(q) || (i.email||'').toLowerCase().includes(q));
+  if(!dsgvoResults.length){ res.innerHTML = '<p class="field-sub">Keine Treffer.</p>'; return; }
+  res.innerHTML = `<p style="font-size:.85rem;margin:6px 0">${dsgvoResults.length} Datensatz/Datensätze gefunden:</p>
+    ${dsgvoResults.slice(0,25).map(i=>`<div class="field-sub">• ${esc(i.besucherName)} · ${esc(i.firma||'–')} · ${fmtDate(i.besuchsdatum)} (${esc(i.werk)})</div>`).join('')}
+    ${dsgvoResults.length>25?`<div class="field-sub">… und ${dsgvoResults.length-25} weitere</div>`:''}
+    <div class="card-actions" style="margin-top:8px">
+      <button class="btn btn-sm btn-outline" onclick="dsgvoExport()">⬇ Auskunft (CSV)</button>
+      <button class="btn btn-sm btn-danger" onclick="dsgvoDelete()">Alle löschen</button>
+    </div>`;
+}
+function dsgvoExport(){
+  if(!dsgvoResults.length) return;
+  downloadCsv(buildCsv(dsgvoResults), `dsgvo_auskunft_${todayStr()}.csv`);
+  toast('Auskunft exportiert – vertraulich behandeln.','success');
+}
+async function dsgvoDelete(){
+  if(!isAdmin()){ toast('Nur Administrator darf löschen.','error'); return; }
+  if(!dsgvoResults.length) return;
+  if(!confirm(`${dsgvoResults.length} Datensatz/Datensätze endgültig und unwiderruflich löschen?`)) return;
+  let n=0;
+  for(const i of dsgvoResults){ try{ await gDelete(`/sites/${siteId}/lists/${listId}/items/${i.id}`); n++; }catch(e){ console.warn('dsgvoDelete', e.message); } }
+  toast(`${n} Datensatz/Datensätze gelöscht.`,'success');
+  await loadItems(); dsgvoFind();
 }
 
 // ── REPORTS ─────────────────────────────────────────────────────────────────
@@ -1125,7 +1210,7 @@ function renderAnleitung(){
       </ul>
       <ol>
         <li><b>Werk</b>, <b>Bereich</b>, <b>Ansprechpartner</b> (Gastgeber), <b>Datum</b> und <b>Firma</b> ausfüllen (Pflichtfelder mit <span class="req">*</span>).</li>
-        <li>Besucher eintragen; mit <b>„+ weitere Person (gleiche Firma)"</b> mehrere Personen ergänzen. Optionale Felder nur bei Bedarf.</li>
+        <li>Besucher eintragen; mit <b>„+ weitere Person (gleiche Firma)"</b> mehrere Personen ergänzen. Name und Firma bieten <b>Vorschläge aus früheren Besuchen</b>. Optionale Felder nur bei Bedarf.</li>
         <li><b>Besuchszweck</b> und ausgegebene <b>PSA</b> ankreuzen.</li>
         <li>Bei „vor Ort": <b>SHB akzeptiert</b> anhaken und <b>digital unterschreiben</b> (Maus/Finger).</li>
         <li><b>Speichern</b> – danach können Sie sofort eine Einladung senden (siehe 5).</li>
@@ -1137,6 +1222,7 @@ function renderAnleitung(){
         <li><b>CheckIn</b> beim Eintreffen setzt die Eingangszeit. Fehlt bei einer Voranmeldung noch die SHB, öffnet sich zuerst die <b>Sicherheitsunterweisung</b> (Schritt 2) – bestätigen und unterschreiben lassen.</li>
         <li><b>CheckOut</b> beim Verlassen setzt die Abgangszeit und <b>schließt</b> den Datensatz (nur mit vollständigen Pflichtfeldern / SHB).</li>
         <li>Bei mehreren Personen einer Firma: <b>„Alle CheckIn / Alle CheckOut"</b> erledigt die Gruppe auf einmal.</li>
+        <li>Der <b>Datumsfilter</b> (Heute / Diese Woche / Alle) hält die Liste übersichtlich – Standard ist „Heute".</li>
         <li>Mit <b>⏱ Auto</b> (oben rechts) aktualisiert sich die Liste automatisch (alle 45 s).</li>
       </ul>`)}
 
@@ -1148,7 +1234,8 @@ function renderAnleitung(){
       <ul>
         <li>Überblick mit Kennzahlen und <b>allen</b> Datensätzen Ihrer Werke – filterbar nach <b>Suche</b>, <b>Status</b> und <b>Werk</b>.</li>
         <li>Die Kachel <b>„Noch anwesend &gt; ${ANWESEND_WARN_STUNDEN} h"</b> und der rote <b>⚠-Hinweis</b> markieren Besucher, die eingecheckt, aber noch nicht ausgecheckt sind – wichtig für Vollständigkeit/Evakuierung.</li>
-        <li><b>⬇ CSV</b> exportiert die aktuell gefilterten Datensätze (z. B. für Audits). Enthält personenbezogene Daten – vertraulich behandeln.</li>
+        <li><b>🖨 Anwesenheitsliste</b> druckt alle aktuell eingecheckten Besucher je Werk – für Evakuierung/Muster.</li>
+        <li>Filter nach <b>Datum</b> (Heute/Woche); <b>⬇ CSV</b> exportiert die gefilterten Datensätze (personenbezogen – vertraulich behandeln).</li>
       </ul>`)}
 
     ${sect('7 · Datensätze bearbeiten, Vorlage &amp; Beleg', `
@@ -1163,7 +1250,8 @@ function renderAnleitung(){
       <p>Unter <button class="link-btn" onclick="openSettings()">⚙️ Einstellungen</button> → <b>Zugriffsverwaltung</b>:
       E-Mail/UPN hinzufügen, <b>Rolle</b> wählen und <b>Werke</b> freigeben. Neue Nutzer starten als SHB-Verantwortlicher.
       Warten Sie nach dem Eintragen auf die Meldung <b>„gespeichert ✓"</b>. Dort lässt sich auch die
-      <b>Sicherheitsunterweisung global aktivieren/deaktivieren</b>.</p>` ) : ''}
+      <b>Sicherheitsunterweisung global aktivieren/deaktivieren</b> und unter <b>DSGVO – Betroffenenrechte</b>
+      alle Daten einer Person suchen, als <b>Auskunft (CSV)</b> exportieren oder <b>löschen</b>.</p>` ) : ''}
 
     ${sect(`${admin?'9':'8'} · Datenschutz`, `
       <ul>
@@ -1253,7 +1341,15 @@ function openSettings(){
         <input type="email" id="access-new-upn" placeholder="name@dihag.com" class="su-input">
         <button class="btn btn-sm btn-primary" onclick="addAccessUser()">+ Hinzufügen</button>
       </div>
-      ${userBlocks}`;
+      ${userBlocks}
+      <hr class="modal-hr">
+      <div class="settings-section-title">🔎 DSGVO – Betroffenenrechte</div>
+      <p class="field-sub" style="margin-bottom:8px">Besucher per Name oder E-Mail suchen, Daten als Auskunft exportieren (Art. 15) oder löschen (Art. 17).</p>
+      <div class="su-add" style="display:flex;gap:8px;margin-bottom:6px">
+        <input type="text" id="dsgvo-q" placeholder="Name oder E-Mail" class="su-input" onkeydown="if(event.key==='Enter')dsgvoFind()">
+        <button class="btn btn-sm btn-primary" onclick="dsgvoFind()">Suchen</button>
+      </div>
+      <div id="dsgvo-res"></div>`;
   }
   $id('settings-body').innerHTML = meBlock + rechteBlock + adminBlock;
   $id('settings-modal').classList.remove('hidden');

@@ -96,6 +96,7 @@ async function main() {
   w.fetch = fakeFetch;
   w.event = undefined;
   w.confirm = () => true;
+  w.print = () => {};
   w.HTMLCanvasElement.prototype.getContext = () => ({
     lineWidth:0, lineCap:'', strokeStyle:'', beginPath(){}, moveTo(){}, lineTo(){}, stroke(){}, clearRect(){}
   });
@@ -103,7 +104,7 @@ async function main() {
 
   // app.js in der Fensterrealität ausführen + Test-Handles exportieren
   let src = readFileSync(join(root, 'app.js'), 'utf8');
-  src += `\n;window.__app = { submitNew, navigate, applyTemplate, sendSavedInvite, isOverdue, buildCsv, canEditItem, findDuplicate, setNewMode, openSHBModal, saveSHB, shbActive, get HAVE(){return HAVE}, get C(){return C}, WERKE, get account(){return account}, isFull, canSeeDashboard, canSeeReports, isMine };`;
+  src += `\n;window.__app = { submitNew, navigate, applyTemplate, sendSavedInvite, isOverdue, buildCsv, canEditItem, findDuplicate, setNewMode, openSHBModal, saveSHB, shbActive, inDateScope, printAttendance, dsgvoFind, openSettings, get HAVE(){return HAVE}, get C(){return C}, WERKE, get account(){return account}, isFull, canSeeDashboard, canSeeReports, isMine };`;
   w.eval(src);
 
   // Auf Boot warten (discoverSP füllt HAVE)
@@ -212,6 +213,28 @@ async function main() {
   ok(patches.length > before && lastPatch.SHBAkzeptiert === true, 'SHB nachträglich: SHBAkzeptiert gesetzt');
   ok(typeof lastPatch.Signatur === 'string' && lastPatch.Signatur.startsWith('data:image'), 'SHB nachträglich: Unterschrift gespeichert');
   ok(w.__app.shbActive() === true, 'SHB standardmäßig aktiv');
+
+  // Datums-Bereich
+  const t = new Date().toISOString().slice(0,10);
+  ok(w.__app.inDateScope(t, 'today') === true && w.__app.inDateScope('2000-01-01', 'today') === false, 'Datumsfilter „Heute"');
+  ok(w.__app.inDateScope('2000-01-01', '') === true, 'Datumsfilter „Alle"');
+
+  // Anwesenheitsliste (Evakuierung) – Druckbereich befüllt
+  w.__app.printAttendance();
+  ok(doc.getElementById('print-area').innerHTML.includes('Anwesenheitsliste'), 'Anwesenheitsliste erzeugt');
+
+  // Autocomplete-Datalists aus früheren Besuchen (rec1: Erika/Beta AG)
+  w.__app.navigate('new');
+  await sleep(5);
+  ok(!!doc.querySelector('#dl-firma option[value="Beta AG"]'), 'Autocomplete Firma aus Historie');
+  ok(!!doc.querySelector('#dl-names option[value="Erika Ohne SHB"]'), 'Autocomplete Name aus Historie');
+
+  // DSGVO-Suche (Admin)
+  w.__app.openSettings();
+  await sleep(5);
+  doc.getElementById('dsgvo-q').value = 'erika';
+  w.__app.dsgvoFind();
+  ok(doc.getElementById('dsgvo-res').textContent.includes('gefunden'), 'DSGVO: Treffer gefunden');
 
   // Anleitung-Reiter
   w.__app.navigate('anleitung');
