@@ -1365,3 +1365,10 @@ details#attach-extra-wrap[open] .attach-more-toggle { color:#374151; }
 .modal{ max-height: calc(100vh - 40px); display: flex; flex-direction: column; }
 .modal-header, .modal-footer{ flex-shrink: 0; }
 .modal-body{ overflow-y: auto; }
+
+/* ── Besuchermanagement: Reports-Trend ───────────────────────────────────── */
+.trend{display:flex;flex-direction:column;gap:3px}
+.trend-row{display:flex;align-items:center;gap:8px;font-size:.78rem}
+.trend-lbl{width:54px;color:#6b7280;flex-shrink:0;text-align:right}
+.trend-bar{height:14px;background:linear-gradient(90deg,#1a56db,#60a5fa);border-radius:3px;min-width:2px}
+.trend-val{color:#374151;font-weight:600;min-width:20px}

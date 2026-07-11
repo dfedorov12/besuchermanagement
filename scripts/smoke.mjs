@@ -64,11 +64,20 @@ async function fakeFetch(url, opts) {
   if (u.includes('/lists/Besucheranmeldung')) return resp({ id:'listid', displayName:'Besucheranmeldung' });
   if (u.includes('/lists/listid/columns')) return resp({ value: COLS.map(n => ({ name:n, displayName:n })) });
   if (u.includes('/lists?$select=id,displayName')) return resp({ value: [] });  // keine Config-Liste
-  // items GET: ein Datensatz OHNE SHB (für „SHB nachträglich")
-  if (u.includes('/lists/listid/items')) return resp({ value: [
-    { id:'rec1', createdDateTime:new Date().toISOString(), createdBy:{ user:{ email:'administrator@dihag.com', displayName:'Administrator' } },
-      fields:{ Title:'Erika Ohne SHB', Werk:'SHB', Bereich:'Tor 2', Firma:'Beta AG', Status:'Angemeldet', SHBAkzeptiert:false } }
-  ] });
+  // items GET über zwei Seiten (nextLink) → testet Pagination.
+  // Seite 1: rec1 (ohne SHB, für „SHB nachträglich"); Seite 2: rec2 (eingecheckt).
+  if (u.includes('/lists/listid/items')) {
+    const nowIso = new Date().toISOString();
+    if (u.includes('nextpage')) return resp({ value: [
+      { id:'rec2', createdDateTime:nowIso, createdBy:{ user:{ email:'administrator@dihag.com', displayName:'Administrator' } },
+        fields:{ Title:'Hans Vorort', Werk:'DSO', Bereich:'Tor 1', Firma:'Gamma AG', Status:'Eingecheckt', SHBAkzeptiert:true,
+          Besuchsdatum:nowIso, Eingangszeit:nowIso } }
+    ] });
+    return resp({ value: [
+      { id:'rec1', createdDateTime:nowIso, createdBy:{ user:{ email:'administrator@dihag.com', displayName:'Administrator' } },
+        fields:{ Title:'Erika Ohne SHB', Werk:'SHB', Bereich:'Tor 2', Firma:'Beta AG', Status:'Angemeldet', SHBAkzeptiert:false } }
+    ], '@odata.nextLink': 'https://graph.microsoft.com/v1.0/sites/siteid/lists/listid/items?nextpage=1' });
+  }
   return resp({});
 }
 
@@ -104,7 +113,7 @@ async function main() {
 
   // app.js in der Fensterrealität ausführen + Test-Handles exportieren
   let src = readFileSync(join(root, 'app.js'), 'utf8');
-  src += `\n;window.__app = { submitNew, navigate, applyTemplate, sendSavedInvite, isOverdue, buildCsv, canEditItem, findDuplicate, setNewMode, openSHBModal, saveSHB, shbActive, inDateScope, printAttendance, dsgvoFind, openSettings, get HAVE(){return HAVE}, get C(){return C}, WERKE, get account(){return account}, isFull, canSeeDashboard, canSeeReports, isMine };`;
+  src += `\n;window.__app = { submitNew, navigate, applyTemplate, sendSavedInvite, isOverdue, buildCsv, canEditItem, findDuplicate, setNewMode, openSHBModal, saveSHB, shbActive, inDateScope, printAttendance, dsgvoFind, openSettings, sortList, setKioskTimeout, get itemCount(){return ITEMS.length}, get kioskMin(){return Number(appSettings.kioskTimeoutMin)||0}, get HAVE(){return HAVE}, get C(){return C}, WERKE, get account(){return account}, isFull, canSeeDashboard, canSeeReports, isMine };`;
   w.eval(src);
 
   // Auf Boot warten (discoverSP füllt HAVE)
@@ -235,6 +244,33 @@ async function main() {
   doc.getElementById('dsgvo-q').value = 'erika';
   w.__app.dsgvoFind();
   ok(doc.getElementById('dsgvo-res').textContent.includes('gefunden'), 'DSGVO: Treffer gefunden');
+
+  // Pagination über zwei Seiten (rec1 + rec2)
+  ok(w.__app.itemCount === 2, 'Pagination: zweite Seite (nextLink) geladen');
+
+  // Sortierung
+  const sn = w.__app.sortList([{besucherName:'Zoe',besuchsdatum:'2026-01-01'},{besucherName:'Anna',besuchsdatum:'2026-01-02'}], 'name');
+  ok(sn[0].besucherName === 'Anna', 'Sortierung nach Name (A–Z)');
+  const sd = w.__app.sortList([{besuchsdatum:'2026-01-01'},{besuchsdatum:'2026-02-01'}], 'date-desc');
+  ok(sd[0].besuchsdatum === '2026-02-01', 'Sortierung Datum neueste zuerst');
+
+  // Reports mit Zeitraum/Trend
+  w.__app.navigate('reports');
+  await sleep(5);
+  ok(doc.getElementById('reports-body').textContent.includes('Verlauf'), 'Reports: Verlauf/Trend gerendert');
+  ok(doc.getElementById('reports-body').textContent.includes('Aufenthalt'), 'Reports: ø-Aufenthalt gerendert');
+
+  // Kiosk-Auto-Logout-Einstellung
+  w.__app.setKioskTimeout(10);
+  ok(w.__app.kioskMin === 10, 'Kiosk-Timeout gesetzt');
+  w.__app.setKioskTimeout(0);
+  ok(w.__app.kioskMin === 0, 'Kiosk-Timeout aus');
+
+  // Modal per Esc schließen
+  w.__app.openSettings();
+  await sleep(5);
+  doc.dispatchEvent(new w.KeyboardEvent('keydown', { key:'Escape', bubbles:true }));
+  ok(doc.getElementById('settings-modal').classList.contains('hidden'), 'Esc schließt das Modal');
 
   // Anleitung-Reiter
   w.__app.navigate('anleitung');

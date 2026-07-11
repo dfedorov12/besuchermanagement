@@ -304,8 +304,11 @@ async function loadItems(force){
   if(!siteId||!listId){ try{ await discoverSP(); }catch(e){ toast('SharePoint nicht erreichbar: '+e.message,'error'); return; } }
   setLoading(true);
   try{
-    const res = await gGet(`/sites/${siteId}/lists/${listId}/items?$expand=fields&$top=500&$orderby=createdDateTime desc`);
-    let items = (res.value||[]).map(normalize);
+    // Alle Seiten laden (nextLink), nicht auf 500 begrenzen; Sicherheits-Deckel 20 Seiten.
+    let url = `/sites/${siteId}/lists/${listId}/items?$expand=fields&$top=500&$orderby=createdDateTime desc`;
+    let raw = [];
+    for(let page=0; url && page<20; page++){ const res = await gGet(url); raw = raw.concat(res.value||[]); url = res['@odata.nextLink'] || null; }
+    let items = raw.map(normalize);
     // Zugriffsgrenze (UX; echte Grenze = SharePoint-Berechtigungen)
     const allowed = allowedWerke();
     if(!isAdmin()) items = items.filter(i => allowed.includes(i.werk));
@@ -402,7 +405,7 @@ function renderDashboard(){
   const status = $id('dash-status')?.value||'';
   const werk = $id('dash-werk')?.value||'';
   const scope = $id('dash-date')?.value||'';
-  const list = ITEMS.filter(i => recordMatches(i, q, status, werk, scope));
+  const list = sortList(ITEMS.filter(i => recordMatches(i, q, status, werk, scope)), $id('dash-sort')?.value||'');
   const body = $id('dash-list');
   body.innerHTML = list.length ? list.map(recordCard).join('') : `<div class="empty-state">Keine Datensätze für diesen Filter.</div>`;
 }
@@ -413,6 +416,18 @@ function recordMatches(i, q, status, werk, scope){
   if (scope && !inDateScope(i.besuchsdatum, scope)) return false;
   if (q && !((i.besucherName+' '+i.firma+' '+i.werk+' '+i.bereich+' '+i.kennzeichen+' '+i.ansprechName).toLowerCase().includes(q))) return false;
   return true;
+}
+// Sortierung für Dashboard/Datensätze
+const STATUS_ORDER = { 'Eingecheckt':0, 'Angemeldet':1, 'Geschlossen':2 };
+function sortList(list, key){
+  const l = list.slice();
+  const dt = i => (i.besuchsdatum||i.created||'');
+  if (key==='date-asc')  l.sort((a,b)=> dt(a).localeCompare(dt(b)));
+  else if (key==='name') l.sort((a,b)=> (a.besucherName||'').localeCompare(b.besucherName||''));
+  else if (key==='firma')l.sort((a,b)=> (a.firma||'').localeCompare(b.firma||''));
+  else if (key==='status') l.sort((a,b)=> (STATUS_ORDER[a.status]??9)-(STATUS_ORDER[b.status]??9) || dt(b).localeCompare(dt(a)));
+  else l.sort((a,b)=> dt(b).localeCompare(dt(a)));   // date-desc (Standard)
+  return l;
 }
 function recordCard(i){
   const stamp = canStamp() ? (i.status==='Angemeldet'
@@ -732,7 +747,7 @@ function showDiagModal(bad, fatal){
     $id('modal-body').innerHTML = `<p style="font-size:.88rem;color:#374151;margin-bottom:8px">SharePoint lehnt diese Spalte(n) ab – Typ/Optionen in der Liste <b>${esc(SP_LIST)}</b> prüfen:</p><ul style="padding-left:18px">${rows}</ul>`;
   }
   $id('modal-footer').innerHTML = `<button class="btn btn-primary" onclick="closeModal()">Verstanden</button>`;
-  $id('modal-overlay').classList.remove('hidden');
+  $id('modal-overlay').classList.remove('hidden'); focusModal('modal-overlay');
 }
 
 // ── EINLADUNG PER E-MAIL (Microsoft Graph /me/sendMail) ──────────────────────
@@ -804,7 +819,7 @@ function showPostSaveModal(head, visitors){
     <p class="dsgvo-hint" style="margin-top:8px">Beim ersten Versand fragt Microsoft einmalig nach der Berechtigung „E-Mail senden". Die Unterschrift zur Sicherheitsunterweisung erfolgt beim Check-in am Empfang.</p>`;
   const allBtn = (visitors.length>1 && anyEmail) ? `<button class="btn btn-ghost" onclick="sendAllSavedInvites()">Alle einladen</button>` : '';
   $id('modal-footer').innerHTML = `${allBtn}<button class="btn btn-primary" onclick="closeModal();navigate('checkin')">Weiter zum Empfang</button>`;
-  $id('modal-overlay').classList.remove('hidden');
+  $id('modal-overlay').classList.remove('hidden'); focusModal('modal-overlay');
 }
 async function sendSavedInvite(idx){ if(lastSaved) await sendMailInvite(lastSaved.head, lastSaved.visitors[idx]); }
 async function sendAllSavedInvites(){ if(!lastSaved) return; for(const v of lastSaved.visitors){ if(v.email) await sendMailInvite(lastSaved.head, v); } }
@@ -906,6 +921,16 @@ function toggleAutoRefresh(){
   toast(autoRefreshTimer ? 'Auto-Aktualisierung an (alle 45 s)' : 'Auto-Aktualisierung aus','info');
 }
 
+// ── KIOSK-AUTO-LOGOUT (Inaktivität) ─────────────────────────────────────────
+let idleTimer = null;
+function resetIdle(){
+  if(idleTimer){ clearTimeout(idleTimer); idleTimer=null; }
+  const min = Number(appSettings.kioskTimeoutMin)||0;
+  if(min>0 && account){ idleTimer = setTimeout(()=>{ toast('Automatische Abmeldung wegen Inaktivität.','info'); doLogout(); }, min*60000); }
+}
+function setKioskTimeout(v){ if(!isAdmin()) return; appSettings.kioskTimeoutMin = Math.max(0, parseInt(v,10)||0); saveAccessConfig(); resetIdle(); }
+['mousemove','keydown','click','touchstart','scroll'].forEach(ev => window.addEventListener(ev, resetIdle, { passive:true }));
+
 // ── SICHERHEITSUNTERWEISUNG NACHHOLEN (Schritt 2) ───────────────────────────
 let shbSigPad = null;
 function openSHBModal(id){
@@ -920,7 +945,7 @@ function openSHBModal(id){
     <div class="sig-wrap"><canvas id="sig-modal" class="sig-canvas" width="420" height="150"></canvas></div>
     <div class="sig-actions"><button class="mini-btn" onclick="shbSigPad && shbSigPad.clear()">Löschen</button></div>`;
   $id('modal-footer').innerHTML = `<button class="btn btn-ghost" onclick="closeModal()">Abbrechen</button><button class="btn btn-primary" onclick="saveSHB('${id}')">Bestätigen</button>`;
-  $id('modal-overlay').classList.remove('hidden');
+  $id('modal-overlay').classList.remove('hidden'); focusModal('modal-overlay');
   shbSigPad = makeSigPad($id('sig-modal'));
 }
 async function saveSHB(id){
@@ -940,7 +965,7 @@ function renderRecords(){
   const q = ($id('search-records')?.value||'').toLowerCase();
   const sf = $id('filter-status')?.value||'';
   const scope = $id('rec-date')?.value||'';
-  const list = ITEMS.filter(isMine).filter(i => recordMatches(i, q, sf, '', scope));
+  const list = sortList(ITEMS.filter(isMine).filter(i => recordMatches(i, q, sf, '', scope)), $id('rec-sort')?.value||'');
   const body = $id('records-body');
   if(!list.length){ body.innerHTML = `<div class="empty-state">Noch keine eigenen Datensätze – lege unter „Neue Anmeldung" welche an.</div>`; return; }
   body.innerHTML = list.map(recordCard).join('');
@@ -1019,7 +1044,7 @@ function openEditModal(id){
     <div class="form-sub-h">PSA</div><div class="psa-grid">${psaBoxes}</div>
     <div class="form-group full" style="margin-top:10px"><label>Bemerkungen</label><textarea id="e-bemerk" rows="2">${esc(i.bemerkungen)}</textarea></div>`;
   $id('modal-footer').innerHTML = `<button class="btn btn-ghost" onclick="closeModal()">Abbrechen</button><button class="btn btn-primary" onclick="saveEdit('${i.id}')">Speichern</button>`;
-  $id('modal-overlay').classList.remove('hidden');
+  $id('modal-overlay').classList.remove('hidden'); focusModal('modal-overlay');
 }
 async function saveEdit(id){
   const g = k => $id('e-'+k)?.value.trim();
@@ -1164,13 +1189,43 @@ async function dsgvoDelete(){
 function renderReports(){
   const body = $id('reports-body');
   if(!canSeeReports()){ body.innerHTML = `<div class="empty-state">Reports sind nur für vollberechtigte Rollen sichtbar.</div>`; return; }
-  const per = {}; allowedWerke().forEach(w=>per[w]={ges:0,anwesend:0});
-  ITEMS.forEach(i=>{ if(!per[i.werk]) per[i.werk]={ges:0,anwesend:0}; per[i.werk].ges++; if(i.status==='Eingecheckt') per[i.werk].anwesend++; });
-  const rows = Object.entries(per).sort((a,b)=>b[1].ges-a[1].ges)
+  const days = parseInt($id('rep-period')?.value||'30', 10);
+  const cut = new Date(Date.now() - days*86400000).toISOString().slice(0,10);
+  const inPeriod = i => (i.besuchsdatum||i.created||'').slice(0,10) >= cut;
+  const scoped = ITEMS.filter(inPeriod);
+
+  // Nach Werk
+  const per = {};
+  scoped.forEach(i=>{ (per[i.werk] ||= {ges:0,anwesend:0}).ges++; if(i.status==='Eingecheckt') per[i.werk].anwesend++; });
+  const werkRows = Object.entries(per).sort((a,b)=>b[1].ges-a[1].ges)
     .map(([w,s])=>`<div class="visitor-card"><div class="vc-main"><div class="vc-name">${werkBadge(w)}</div>
-      <div class="vc-sub">${s.ges} Datensätze (letzte 90 Tage) · aktuell anwesend: ${s.anwesend}</div></div></div>`).join('');
-  body.innerHTML = `<h3 class="section-h">Übersicht nach Werk</h3>${rows||'<div class="empty-state">Keine Daten.</div>'}
-    <div class="privacy-note" style="margin-top:16px">Reports zeigen nur aggregierte Zahlen deiner freigegebenen Werke. Aufbewahrung: 90 Tage, danach automatische Löschung.</div>`;
+      <div class="vc-sub">${s.ges} Besuche · aktuell anwesend: ${s.anwesend}</div></div></div>`).join('') || '<div class="empty-state">Keine Daten im Zeitraum.</div>';
+
+  // Trend: Besuche pro Tag (letzte min(days,30) Tage)
+  const showDays = Math.min(days, 30);
+  const byDay = {};
+  scoped.forEach(i=>{ const d=(i.besuchsdatum||i.created||'').slice(0,10); if(d) byDay[d]=(byDay[d]||0)+1; });
+  const dayList = [];
+  for(let k=showDays-1;k>=0;k--){ const d=new Date(Date.now()-k*86400000).toISOString().slice(0,10); dayList.push([d, byDay[d]||0]); }
+  const maxDay = Math.max(1, ...dayList.map(d=>d[1]));
+  const trend = dayList.map(([d,n])=>`<div class="trend-row"><span class="trend-lbl">${d.slice(8,10)}.${d.slice(5,7)}.</span>
+    <span class="trend-bar" style="width:${Math.round(n/maxDay*100)}%"></span><span class="trend-val">${n}</span></div>`).join('');
+
+  // Ø-Aufenthaltsdauer (geschlossene Besuche mit Ein-/Abgang)
+  const durs = scoped.filter(i=>i.eingang&&i.abgang).map(i=>(new Date(i.abgang)-new Date(i.eingang))/60000).filter(m=>m>0&&m<60*24);
+  const avgMin = durs.length ? Math.round(durs.reduce((a,b)=>a+b,0)/durs.length) : 0;
+  const avgTxt = durs.length ? `${Math.floor(avgMin/60)} h ${avgMin%60} min (${durs.length} abgeschlossene)` : '– (keine abgeschlossenen Besuche)';
+
+  body.innerHTML = `
+    <div class="stat-grid" style="margin-bottom:18px">
+      <div class="stat-card today"><div class="stat-num">${scoped.length}</div><div class="stat-lbl">Besuche im Zeitraum</div></div>
+      <div class="stat-card on-site"><div class="stat-num">${ITEMS.filter(i=>i.status==='Eingecheckt').length}</div><div class="stat-lbl">Aktuell anwesend</div></div>
+      <div class="stat-card"><div class="stat-num">${avgMin?Math.floor(avgMin/60)+'h '+(avgMin%60)+'m':'–'}</div><div class="stat-lbl">Ø Aufenthalt</div></div>
+    </div>
+    <h3 class="section-h">Verlauf (Besuche pro Tag)</h3>
+    <div class="trend">${trend}</div>
+    <h3 class="section-h" style="margin-top:18px">Nach Werk</h3>${werkRows}
+    <div class="privacy-note" style="margin-top:12px">Ø Aufenthaltsdauer: ${esc(avgTxt)}. Nur aggregierte Zahlen deiner freigegebenen Werke. Aufbewahrung 90 Tage.</div>`;
 }
 
 // ── ANLEITUNG (Hilfe-Reiter) ────────────────────────────────────────────────
@@ -1235,7 +1290,8 @@ function renderAnleitung(){
         <li>Überblick mit Kennzahlen und <b>allen</b> Datensätzen Ihrer Werke – filterbar nach <b>Suche</b>, <b>Status</b> und <b>Werk</b>.</li>
         <li>Die Kachel <b>„Noch anwesend &gt; ${ANWESEND_WARN_STUNDEN} h"</b> und der rote <b>⚠-Hinweis</b> markieren Besucher, die eingecheckt, aber noch nicht ausgecheckt sind – wichtig für Vollständigkeit/Evakuierung.</li>
         <li><b>🖨 Anwesenheitsliste</b> druckt alle aktuell eingecheckten Besucher je Werk – für Evakuierung/Muster.</li>
-        <li>Filter nach <b>Datum</b> (Heute/Woche); <b>⬇ CSV</b> exportiert die gefilterten Datensätze (personenbezogen – vertraulich behandeln).</li>
+        <li>Filter nach <b>Datum</b> (Heute/Woche) und <b>Sortierung</b> (Datum, Name, Firma, Status); <b>⬇ CSV</b> exportiert die gefilterten Datensätze (personenbezogen – vertraulich behandeln).</li>
+        <li><b>Reports</b> zeigen Kennzahlen, den Besuchs-Verlauf pro Tag und die ø-Aufenthaltsdauer je Zeitraum (7/30/90 Tage).</li>
       </ul>`)}
 
     ${sect('7 · Datensätze bearbeiten, Vorlage &amp; Beleg', `
@@ -1250,7 +1306,8 @@ function renderAnleitung(){
       <p>Unter <button class="link-btn" onclick="openSettings()">⚙️ Einstellungen</button> → <b>Zugriffsverwaltung</b>:
       E-Mail/UPN hinzufügen, <b>Rolle</b> wählen und <b>Werke</b> freigeben. Neue Nutzer starten als SHB-Verantwortlicher.
       Warten Sie nach dem Eintragen auf die Meldung <b>„gespeichert ✓"</b>. Dort lässt sich auch die
-      <b>Sicherheitsunterweisung global aktivieren/deaktivieren</b> und unter <b>DSGVO – Betroffenenrechte</b>
+      <b>Sicherheitsunterweisung global aktivieren/deaktivieren</b>, der <b>Kiosk-Modus</b> (automatische Abmeldung
+      nach Inaktivität) einstellen und unter <b>DSGVO – Betroffenenrechte</b>
       alle Daten einer Person suchen, als <b>Auskunft (CSV)</b> exportieren oder <b>löschen</b>.</p>` ) : ''}
 
     ${sect(`${admin?'9':'8'} · Datenschutz`, `
@@ -1335,6 +1392,13 @@ function openSettings(){
       </div>
       <p class="field-sub" style="margin-bottom:4px">Ist die SHB deaktiviert, entfällt Unterschrift/Bestätigung beim Anlegen und beim CheckIn/CheckOut.</p>
       <hr class="modal-hr">
+      <div class="settings-section-title">🖥 Kiosk-Modus</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;font-size:.88rem;margin-bottom:4px">
+        <span>Automatische Abmeldung nach Inaktivität (Minuten, 0 = aus)</span>
+        <input type="number" min="0" max="120" value="${Number(appSettings.kioskTimeoutMin)||0}" class="su-num" style="width:70px" onchange="setKioskTimeout(this.value)">
+      </div>
+      <p class="field-sub" style="margin-bottom:4px">Schützt personenbezogene Daten am geteilten Empfangs-PC. Gilt für alle Geräte.</p>
+      <hr class="modal-hr">
       <div class="settings-section-title">🔐 Zugriffsverwaltung (Werk + Rolle)</div>
       <p class="field-sub" style="margin-bottom:8px">Rolle und freigegebene Werke je Person festlegen. Als Administrator haben Sie immer Zugriff auf alle Werke.</p>
       <div class="su-add" style="display:flex;gap:8px;margin-bottom:12px">
@@ -1352,7 +1416,7 @@ function openSettings(){
       <div id="dsgvo-res"></div>`;
   }
   $id('settings-body').innerHTML = meBlock + rechteBlock + adminBlock;
-  $id('settings-modal').classList.remove('hidden');
+  $id('settings-modal').classList.remove('hidden'); focusModal('settings-modal');
 }
 function closeSettings(){ $id('settings-modal').classList.add('hidden'); }
 function addAccessUser(){
@@ -1383,13 +1447,21 @@ function showPrivacyNotice(){
     <p class="dsgvo-hint">Entwurf – vor Produktivnutzung durch DSB/Rechtsabteilung und Betriebsrat freigeben.</p>
   </div>`;
   $id('modal-footer').innerHTML = `<button class="btn btn-ghost" onclick="window.print()">Drucken</button><button class="btn btn-primary" onclick="closeModal()">Schließen</button>`;
-  $id('modal-overlay').classList.remove('hidden');
+  $id('modal-overlay').classList.remove('hidden'); focusModal('modal-overlay');
 }
 function closeModal(){ $id('modal-overlay').classList.add('hidden'); }
 
 // ── BOOT ────────────────────────────────────────────────────────────────────
 document.querySelectorAll('.nav-item').forEach(n=>n.addEventListener('click', e=>{ e.preventDefault(); navigate(n.dataset.view); }));
 $id('menu-toggle')?.addEventListener('click', ()=> $id('sidebar').classList.toggle('open'));
+// Modal-Feinschliff: Esc schließt das oberste offene Modal
+document.addEventListener('keydown', e=>{
+  if(e.key!=='Escape') return;
+  if(!$id('settings-modal').classList.contains('hidden')) closeSettings();
+  else if(!$id('modal-overlay').classList.contains('hidden')) closeModal();
+});
+// Fokus auf das erste Bedienelement, wenn ein Modal geöffnet wird
+function focusModal(id){ setTimeout(()=>{ $id(id)?.querySelector('.modal-body input,.modal-body select,.modal-body textarea,.modal-body button')?.focus(); }, 30); }
 
 async function boot(){
   try{
@@ -1436,6 +1508,7 @@ async function boot(){
 
     $id('boot').style.display='none';
     $id('app').style.display='';
+    resetIdle();   // Kiosk-Auto-Logout starten (falls konfiguriert)
     await loadItems();
     navigate(canSeeDashboard() ? 'dashboard' : 'new');
   }catch(e){

@@ -115,6 +115,13 @@
             <option value="today">Heute</option>
             <option value="week">Diese Woche</option>
           </select>
+          <select id="dash-sort" class="sort-select" onchange="renderDashboard()">
+            <option value="date-desc">Neueste zuerst</option>
+            <option value="date-asc">Älteste zuerst</option>
+            <option value="name">Name (A–Z)</option>
+            <option value="firma">Firma (A–Z)</option>
+            <option value="status">Status</option>
+          </select>
           <button class="btn btn-sm btn-outline" onclick="printAttendance()" title="Aktuell anwesende Besucher drucken (Evakuierung)">🖨 Anwesenheitsliste</button>
           <button class="btn btn-sm btn-outline" onclick="exportCsv()" title="Gefilterte Datensätze als CSV exportieren">⬇ CSV</button>
         </div>
@@ -158,12 +165,26 @@
             <option value="today">Heute</option>
             <option value="week">Diese Woche</option>
           </select>
+          <select id="rec-sort" class="sort-select" onchange="renderRecords()">
+            <option value="date-desc">Neueste zuerst</option>
+            <option value="date-asc">Älteste zuerst</option>
+            <option value="name">Name (A–Z)</option>
+            <option value="firma">Firma (A–Z)</option>
+            <option value="status">Status</option>
+          </select>
         </div>
         <div id="records-body"></div>
       </div>
 
       <!-- REPORTS -->
       <div id="view-reports" class="view">
+        <div class="view-toolbar">
+          <select id="rep-period" class="sort-select" onchange="renderReports()">
+            <option value="7">Letzte 7 Tage</option>
+            <option value="30" selected>Letzte 30 Tage</option>
+            <option value="90">Letzte 90 Tage</option>
+          </select>
+        </div>
         <div id="reports-body"></div>
       </div>
 
