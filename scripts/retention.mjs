@@ -14,8 +14,9 @@ const RETENTION_DAYS = parseInt(process.env.RETENTION_DAYS || '90', 10);
 const API = 'https://graph.microsoft.com/v1.0';
 
 if (!TENANT_ID || !CLIENT_ID || !CLIENT_SECRET) {
-  console.error('Fehlende Secrets: TENANT_ID / CLIENT_ID / CLIENT_SECRET');
-  process.exit(1);
+  // Nicht konfiguriert → sauber überspringen (kein Fehler), bis der App-only-Zugang steht. Siehe SETUP.md §4.
+  console.log('Aufbewahrung übersprungen: TENANT_ID/CLIENT_ID/CLIENT_SECRET nicht gesetzt – App-only-Zugang noch nicht konfiguriert.');
+  process.exit(0);
 }
 
 async function getToken() {
