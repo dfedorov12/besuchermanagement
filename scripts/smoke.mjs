@@ -140,7 +140,8 @@ async function main() {
   ok(doc.getElementById('shb-section').style.display !== 'none', 'Vor Ort: SHB sichtbar');
   const set = (id, v) => { const el = doc.getElementById(id); el.value = v; };
   set('f-werk', 'SHB'); set('f-bereich', 'Halle 3'); set('f-firma', 'ACME GmbH');
-  doc.querySelector('#visitors [data-f="name"]').value = 'Max Mustermann';
+  doc.querySelector('#visitors [data-f="nachname"]').value = 'Mustermann';    // getrennte Namensfelder
+  doc.querySelector('#visitors [data-f="vorname"]').value = 'Max';
   doc.querySelector('#visitors [data-f="funktion"]').value = 'Einkauf';       // Spalte fehlt → darf NICHT gesendet werden
   doc.querySelector('#visitors [data-f="tel"]').value = '0123';               // Spalte fehlt → darf NICHT gesendet werden
   doc.querySelector('#visitors [data-f="email"]').value = 'max@acme.example'; // Spalte existiert → wird gesendet
@@ -161,7 +162,7 @@ async function main() {
   ok(posts.length === 1, 'Genau ein Datensatz gepostet');
   ok(!sentUnknownColumn, 'KEINE nicht existierende Spalte gesendet (kein 400)');
   const f = posts[0] || {};
-  ok(f.Title === 'Max Mustermann', 'Title = Besuchername gesetzt');
+  ok(f.Title === 'Mustermann, Max', 'Title = „Nachname, Vorname" aus getrennten Feldern');
   ok(f.Werk === 'SHB', 'Werk gesetzt');
   ok(f.Status === 'Angemeldet', 'Status = Angemeldet');
   ok(f.Firma === 'ACME GmbH', 'Firma gesetzt');
@@ -236,7 +237,7 @@ async function main() {
   w.__app.navigate('new');
   await sleep(5);
   ok(!!doc.querySelector('#dl-firma option[value="Beta AG"]'), 'Autocomplete Firma aus Historie');
-  ok(!!doc.querySelector('#dl-names option[value="Erika Ohne SHB"]'), 'Autocomplete Name aus Historie');
+  ok(!!doc.querySelector('#dl-nachnamen option[value="Erika Ohne SHB"]'), 'Autocomplete Nachname aus Historie');
 
   // DSGVO-Suche (Admin)
   w.__app.openSettings();
@@ -247,6 +248,11 @@ async function main() {
 
   // Pagination über zwei Seiten (rec1 + rec2)
   ok(w.__app.itemCount === 2, 'Pagination: zweite Seite (nextLink) geladen');
+
+  // CheckOut rot im Dashboard (rec2 ist eingecheckt)
+  w.__app.navigate('dashboard');
+  await sleep(5);
+  ok(doc.getElementById('dash-list').innerHTML.includes('btn-checkout'), 'CheckOut-Button rot (btn-checkout)');
 
   // Sortierung
   const sn = w.__app.sortList([{besucherName:'Zoe',besuchsdatum:'2026-01-01'},{besucherName:'Anna',besuchsdatum:'2026-01-02'}], 'name');
@@ -286,7 +292,7 @@ async function main() {
   ok(doc.getElementById('f-werk').value === 'DSO', 'Vorlage: Werk vorbefüllt');
   ok(doc.getElementById('f-bereich').value === 'Tor 1', 'Vorlage: Bereich vorbefüllt');
   ok(doc.getElementById('f-firma').value === 'Beta AG', 'Vorlage: Firma vorbefüllt');
-  ok(doc.querySelector('#visitors [data-f="name"]').value === 'Erika Beispiel', 'Vorlage: Besuchername vorbefüllt');
+  ok(doc.querySelector('#visitors [data-f="nachname"]').value === 'Erika Beispiel', 'Vorlage: Nachname vorbefüllt');
   ok(doc.querySelector('input[name="zweck"][value="Audit"]').checked, 'Vorlage: Besuchszweck übernommen');
   ok(doc.querySelector('#visitors [data-psa][value="Warnweste"]').checked, 'Vorlage: PSA übernommen');
 

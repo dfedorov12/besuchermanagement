@@ -387,6 +387,9 @@ function inDateScope(iso, scope){
 
 function statusBadge(s){ const cls={'Angemeldet':'status-angemeldet','Eingecheckt':'status-eingecheckt','Geschlossen':'status-geschlossen'}[s]||'status-angemeldet'; return `<span class="status-badge ${cls}">${esc(s)}</span>`; }
 function werkBadge(w){ return `<span class="werk-badge">${esc(w||'?')}</span>`; }
+// Besuchername: gespeichert als „Nachname, Vorname" (Title). Getrennte Eingabe/Anzeige.
+function splitName(full){ const s=(full||'').trim(); const i=s.indexOf(','); return i>=0 ? { nachname:s.slice(0,i).trim(), vorname:s.slice(i+1).trim() } : { nachname:s, vorname:'' }; }
+function joinName(n, v){ n=(n||'').trim(); v=(v||'').trim(); return v ? `${n}, ${v}` : n; }
 
 function renderDashboard(){
   if(!canSeeDashboard()){ $id('dash-list').innerHTML = `<div class="empty-state">Das Dashboard ist nur für vollberechtigte Rollen sichtbar.</div>`; $id('dash-stats').innerHTML=''; return; }
@@ -432,7 +435,7 @@ function sortList(list, key){
 function recordCard(i){
   const stamp = canStamp() ? (i.status==='Angemeldet'
       ? `<button class="btn btn-sm btn-success" onclick="event.stopPropagation();checkIn('${i.id}')">CheckIn</button>`
-      : (i.status==='Eingecheckt' ? `<button class="btn btn-sm btn-outline" onclick="event.stopPropagation();checkOut('${i.id}')">CheckOut</button>` : '')) : '';
+      : (i.status==='Eingecheckt' ? `<button class="btn btn-sm btn-checkout" onclick="event.stopPropagation();checkOut('${i.id}')">CheckOut</button>` : '')) : '';
   const over = isOverdue(i);
   const warn = over ? `<span class="warn-chip" title="Noch nicht ausgecheckt">⚠ ${Math.floor(hoursSince(i.eingang))} h anwesend</span>` : '';
   return `<div class="visitor-card${over?' overdue':''}" style="cursor:pointer" onclick="navigate('detail','${i.id}')">
@@ -451,12 +454,16 @@ function renderNewForm(){
   newVisitorSeq = 0;
   const werkOpts = allowedWerke().map(w=>`<option value="${esc(w)}">${esc(w)}</option>`).join('');
   const zweckBoxes = BESUCHSZWECKE.map(z=>`<label><input type="checkbox" name="zweck" value="${esc(z)}"> ${esc(z)}</label>`).join('');
-  // Autocomplete aus früheren Besuchen (Namen/Firmen)
-  const distinct = key => [...new Set(ITEMS.map(i=>i[key]).filter(Boolean))].sort((a,b)=>a.localeCompare(b)).slice(0,500);
-  const dlNames = distinct('besucherName').map(n=>`<option value="${esc(n)}"></option>`).join('');
-  const dlFirms = distinct('firma').map(n=>`<option value="${esc(n)}"></option>`).join('');
+  // Autocomplete aus früheren Besuchen (Nachname/Vorname/Firma)
+  const uniqSort = arr => [...new Set(arr.filter(Boolean))].sort((a,b)=>a.localeCompare(b)).slice(0,500);
+  const namesSplit = uniqSort(ITEMS.map(i=>i.besucherName)).map(splitName);
+  const optList = arr => uniqSort(arr).map(n=>`<option value="${esc(n)}"></option>`).join('');
+  const dlNach = optList(namesSplit.map(n=>n.nachname));
+  const dlVor  = optList(namesSplit.map(n=>n.vorname));
+  const dlFirms = optList(ITEMS.map(i=>i.firma));
   host.innerHTML = `
-  <datalist id="dl-names">${dlNames}</datalist>
+  <datalist id="dl-nachnamen">${dlNach}</datalist>
+  <datalist id="dl-vornamen">${dlVor}</datalist>
   <datalist id="dl-firma">${dlFirms}</datalist>
   <div class="form-card">
     <h2>Neue Besucheranmeldung</h2>
@@ -541,7 +548,9 @@ function applyTemplate(it){
   const row = document.querySelector('#visitors .visitor-row');
   if(row){
     const sv=(sel,v)=>{ const el=row.querySelector(sel); if(el&&v) el.value=v; };
-    sv('[data-f="name"]', it.besucherName);
+    const nm = splitName(it.besucherName);
+    sv('[data-f="nachname"]', nm.nachname);
+    sv('[data-f="vorname"]', nm.vorname);
     sv('[data-f="funktion"]', it.funktion);
     sv('[data-f="tel"]', it.tel);
     sv('[data-f="email"]', it.email);
@@ -561,7 +570,8 @@ function addVisitorRow(first){
       ${first?'' : `<button class="vr-del" onclick="this.closest('.visitor-row').remove()" title="Entfernen">✕</button>`}
     </div>
     <div class="form-grid">
-      <div class="form-group"><label>Name, Vorname <span class="req">*</span></label><input type="text" data-f="name" list="dl-names" autocomplete="off"></div>
+      <div class="form-group"><label>Name (Nachname) <span class="req">*</span></label><input type="text" data-f="nachname" list="dl-nachnamen" autocomplete="off"></div>
+      <div class="form-group"><label>Vorname</label><input type="text" data-f="vorname" list="dl-vornamen" autocomplete="off"></div>
       <div class="form-group"><label>Funktion</label><input type="text" data-f="funktion"></div>
       <div class="form-group"><label>Telefon</label><input type="text" data-f="tel"></div>
       <div class="form-group"><label>E-Mail</label><input type="email" data-f="email"></div>
@@ -639,7 +649,7 @@ async function submitNew(){
   if(shbRequired && !newSigPad?.hasInk()){ toast('Bitte digital unterschreiben (SHB-Bestätigung).','error'); return; }
   const rows = [...document.querySelectorAll('#visitors .visitor-row')];
   const visitors = rows.map(r=>({
-    name: r.querySelector('[data-f="name"]').value.trim(),
+    name: joinName(r.querySelector('[data-f="nachname"]').value, r.querySelector('[data-f="vorname"]').value),
     funktion: r.querySelector('[data-f="funktion"]').value.trim(),
     tel: r.querySelector('[data-f="tel"]').value.trim(),
     email: r.querySelector('[data-f="email"]').value.trim(),
@@ -1030,7 +1040,8 @@ function openEditModal(id){
     <div class="form-grid">
       <div class="form-group"><label>Werk</label><select id="e-werk">${werkOpts}</select></div>
       <div class="form-group"><label>Bereich</label><input id="e-bereich" value="${esc(i.bereich)}"></div>
-      <div class="form-group"><label>Besucher (Name)</label><input id="e-name" value="${esc(i.besucherName)}"></div>
+      <div class="form-group"><label>Name (Nachname)</label><input id="e-nachname" value="${esc(splitName(i.besucherName).nachname)}"></div>
+      <div class="form-group"><label>Vorname</label><input id="e-vorname" value="${esc(splitName(i.besucherName).vorname)}"></div>
       <div class="form-group"><label>Firma</label><input id="e-firma" value="${esc(i.firma)}"></div>
       <div class="form-group"><label>Ansprechpartner</label><input id="e-ansprech" value="${esc(i.ansprechName)}"></div>
       <div class="form-group"><label>Telefon (Ansprechpartner)</label><input id="e-ansprechtel" value="${esc(i.ansprechTel)}"></div>
@@ -1051,14 +1062,15 @@ async function saveEdit(id){
   const werk = g('werk');
   if(!allowedWerke().includes(werk)){ toast('Keine Berechtigung für dieses Werk.','error'); return; }
   const datum = g('datum');
+  const name = joinName(g('nachname'), g('vorname'));
   const zweck = [...document.querySelectorAll('input[name="e-zweck"]:checked')].map(c=>c.value);
   const psa   = [...document.querySelectorAll('input[name="e-psa"]:checked')].map(c=>c.value);
-  const dup = findDuplicate(g('name'), g('firma'), datum, id);
+  const dup = findDuplicate(name, g('firma'), datum, id);
   if(dup && !confirm('Es gibt bereits einen anderen Datensatz mit gleichem Namen/Firma an diesem Tag. Trotzdem speichern?')) return;
   const fields = {};
   putField(fields,'Werk', werk);
   putField(fields,'Bereich', g('bereich'));
-  putField(fields,'BesucherName', g('name'));
+  putField(fields,'BesucherName', name);
   putField(fields,'Firma', g('firma'));
   putField(fields,'AnsprechName', g('ansprech'));
   putField(fields,'AnsprechTel', g('ansprechtel'));

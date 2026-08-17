@@ -1372,3 +1372,7 @@ details#attach-extra-wrap[open] .attach-more-toggle { color:#374151; }
 .trend-lbl{width:54px;color:#6b7280;flex-shrink:0;text-align:right}
 .trend-bar{height:14px;background:linear-gradient(90deg,#1a56db,#60a5fa);border-radius:3px;min-width:2px}
 .trend-val{color:#374151;font-weight:600;min-width:20px}
+
+/* ── Besuchermanagement: CheckOut rot (wer noch anwesend ist) ─────────────── */
+.btn-checkout{background:#dc2626;color:#fff}
+.btn-checkout:hover{background:#b91c1c}
