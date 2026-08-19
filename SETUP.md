@@ -77,8 +77,11 @@ Falls der Name abweicht: `SP_SITE` in `app.js` und in den Workflow-Variablen anp
 | `ConfigValue` | Mehrere Textzeilen (hält JSON) |
 
 Die App legt das `access`-Element selbst an; die **Liste** muss manuell existieren. Der JSON-Inhalt hält
-`users` (Rollen/Werke je UPN) **und** `settings` (u. a. `shbActive` – Sicherheitsunterweisung global an/aus).
-Admin (`administrator@dihag.com`) pflegt in der App unter ⚙️ **Rolle + freigegebene Werke** und die **SHB-Einstellung**.
+`users` (Rollen/Werke je UPN), `groups` (Rollen/Werke je Sicherheitsgruppen-Objekt-ID) **und** `settings`
+(u. a. `shbActive` – Sicherheitsunterweisung global an/aus).
+Admin (`administrator@dihag.com`) pflegt in der App unter ⚙️ **Rolle + freigegebene Werke** (je Nutzer **oder** Gruppe) und die **SHB-Einstellung**.
+
+**Zugriff per Sicherheitsgruppe:** Admin fügt die **Objekt-ID** einer Entra-Sicherheitsgruppe hinzu (Entra → Gruppen → Gruppe → Objekt-ID) samt Bezeichnung, Rolle und Werken. Mitglieder erhalten den Zugriff automatisch. Die Gruppen­mitgliedschaft wird über `POST /me/getMemberGroups` ermittelt – das funktioniert mit dem vorhandenen `User.Read`, **keine Zusatzberechtigung** nötig. Zugriff eines Nutzers = höchste Rolle + Vereinigung der Werke aus allen zutreffenden Nutzer-/Gruppen-Freigaben.
 
 **Rollen:**
 - `verantwortlicher` – legt Anmeldungen an und sieht **nur eigene** Datensätze; kein Dashboard, keine Reports.

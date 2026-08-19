@@ -40,6 +40,7 @@ async function fakeFetch(url, opts) {
   const method = (opts && opts.method) || 'GET';
   const u = String(url);
 
+  if (method === 'POST' && u.includes('/me/getMemberGroups')) return resp({ value: [] });   // Admin: keine Gruppen
   if (method === 'POST' && u.includes('/me/sendMail')) { sentMail.push(JSON.parse(opts.body || '{}')); return resp({}, 202); }
   if (method === 'POST' && u.includes('/lists/listid/items')) {
     const body = JSON.parse(opts.body || '{}');
@@ -297,6 +298,7 @@ async function main() {
   ok(doc.querySelector('#visitors [data-psa][value="Warnweste"]').checked, 'Vorlage: PSA übernommen');
 
   await scenarioAccessMatch();
+  await scenarioGroupAccess();
 
   console.log(failures ? `\nFEHLGESCHLAGEN: ${failures} Prüfung(en)` : '\nALLE PRÜFUNGEN BESTANDEN');
   process.exit(failures ? 1 : 0);
@@ -307,7 +309,8 @@ async function main() {
 async function scenarioAccessMatch() {
   const html = readFileSync(join(root, 'index.html'), 'utf8');
   const fetch2 = async (url, opts) => {
-    const u = String(url);
+    const u = String(url); const method = (opts && opts.method) || 'GET';
+    if (method === 'POST' && u.includes('/me/getMemberGroups')) return resp({ value: [] });
     if (u.includes('/me?$select')) return resp({ userPrincipalName:'Tester@DIHAG.com', mail:'Tester@DIHAG.com', otherMails:[], proxyAddresses:[] });
     if (u.includes('dihag.sharepoint.com:/sites/IT') && !u.includes('/lists')) return resp({ id:'siteid' });
     if (u.includes('/lists/Besucheranmeldung')) return resp({ id:'listid', displayName:'Besucheranmeldung' });
@@ -331,6 +334,40 @@ async function scenarioAccessMatch() {
   ok(w.document.getElementById('app').style.display === '', 'Zugriff trotz Groß-/Kleinschreibung im Konfig-Schlüssel');
   ok(w.__app2.role === 'sekretariat', 'Rolle aus Konfig übernommen (sekretariat)');
   ok(w.__app2.isFull(), 'sekretariat ist vollberechtigt');
+}
+
+// Zugriff per Sicherheitsgruppe: Nutzer ist NICHT als User eingetragen, aber Mitglied
+// einer freigegebenen Gruppe (Matching über Objekt-ID, groß-/kleinschreibungsunabhängig).
+async function scenarioGroupAccess() {
+  const html = readFileSync(join(root, 'index.html'), 'utf8');
+  const GID = '11111111-2222-3333-4444-555555555555';
+  const fetch3 = async (url, opts) => {
+    const u = String(url); const method = (opts && opts.method) || 'GET';
+    if (method === 'POST' && u.includes('/me/getMemberGroups')) return resp({ value: [ GID.toUpperCase() ] });  // Mitglied (Großschreibung)
+    if (u.includes('/me?$select')) return resp({ userPrincipalName:'g@dihag.com', mail:'g@dihag.com', otherMails:[], proxyAddresses:[] });
+    if (u.includes('dihag.sharepoint.com:/sites/IT') && !u.includes('/lists')) return resp({ id:'siteid' });
+    if (u.includes('/lists/Besucheranmeldung')) return resp({ id:'listid', displayName:'Besucheranmeldung' });
+    if (u.includes('/lists/listid/columns')) return resp({ value: COLS.map(n => ({ name:n, displayName:n })) });
+    if (u.includes('/lists?$select=id,displayName')) return resp({ value: [{ id:'cfg', displayName:'BESU_Konfiguration' }] });
+    if (u.includes('/lists/cfg/items')) return resp({ value: [{ id:'a1', fields:{ Title:'access',
+      ConfigValue: JSON.stringify({ users: {}, groups: { [GID]: { role:'sekretariat', werke:['SHB'], label:'Empfang' } } }) } }] });
+    if (u.includes('/lists/listid/items')) return resp({ value: [] });
+    return resp({});
+  };
+  class PCA3 extends FakePCA { getAllAccounts(){ return [{ username:'g@dihag.com', name:'Gruppen-Nutzer', idTokenClaims:{} }]; } }
+  const dom = new JSDOM(html, { url:'http://localhost:8767/', runScripts:'outside-only' });
+  const w = dom.window;
+  w.msal = { PublicClientApplication: PCA3 }; w.fetch = fetch3; w.event = undefined; w.confirm = () => true;
+  w.HTMLCanvasElement.prototype.getContext = () => ({ lineWidth:0,lineCap:'',strokeStyle:'',beginPath(){},moveTo(){},lineTo(){},stroke(){},clearRect(){} });
+  w.HTMLCanvasElement.prototype.toDataURL = () => 'data:image/png;base64,AAAA';
+  let src = readFileSync(join(root, 'app.js'), 'utf8');
+  src += `\n;window.__app3 = { get role(){return myRole()}, isFull, get werke(){return allowedWerke()}, get access(){return myAccess()} };`;
+  w.eval(src);
+  for (let i=0; i<60 && !(w.__app3 && w.__app3.access); i++) await sleep(50);
+  ok(w.document.getElementById('app').style.display === '', 'Zugriff über Sicherheitsgruppe gewährt');
+  ok(w.__app3.role === 'sekretariat', 'Rolle aus Gruppe (sekretariat)');
+  ok(w.__app3.werke.includes('SHB'), 'Werke aus Gruppe (SHB)');
+  ok(w.__app3.isFull(), 'Gruppen-Rolle vollberechtigt');
 }
 
 main().catch(e => { console.error('Smoke-Test-Ausnahme:', e); process.exit(1); });

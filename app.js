@@ -43,6 +43,8 @@ let C = {};                 // logischer Key → interner SP-Spaltenname
 let HAVE = new Set();       // logische Keys, für die eine SP-Spalte wirklich existiert
 let ITEMS = [];             // normalisierte Datensätze
 let accessUsers = {};       // { upn: { role, werke:[] } }
+let accessGroups = {};      // { groupId(lowercase): { role, werke:[], label } }
+let _myGroupIds = new Set();// Objekt-IDs der Sicherheitsgruppen des angemeldeten Nutzers
 let _meIds = null;
 let currentView = 'dashboard';
 let newVisitorSeq = 0;
@@ -181,6 +183,17 @@ async function loadMyIdentities(){
     (me.proxyAddresses||[]).forEach(add);
   }catch(e){ console.warn('[ident]', e.message); }
 }
+// Sicherheitsgruppen des angemeldeten Nutzers (Objekt-IDs, transitiv).
+// Nutzt /me/getMemberGroups – funktioniert mit dem vorhandenen User.Read, keine Zusatzberechtigung.
+async function loadMyGroups(){
+  _myGroupIds = new Set();
+  const claim = account?.idTokenClaims?.groups;   // falls „groups"-Claim konfiguriert ist
+  if (Array.isArray(claim)) claim.forEach(g=>_myGroupIds.add(String(g).toLowerCase()));
+  try{
+    const r = await gPost('/me/getMemberGroups', { securityEnabledOnly: true });
+    (r.value||[]).forEach(g=>_myGroupIds.add(String(g).toLowerCase()));
+  }catch(e){ console.warn('[groups] getMemberGroups:', e.message); }
+}
 function _myIdentities(){
   const ids = new Set(_meIds||[]); const add=v=>{ if(v) ids.add(String(v).trim().toLowerCase()); };
   add(account?.username);
@@ -188,10 +201,17 @@ function _myIdentities(){
   if (Array.isArray(c.emails)) c.emails.forEach(add);
   return ids;
 }
+// Rollen-Rang für Zusammenführung (Nutzer- + Gruppen-Freigaben).
+const ROLE_RANK = { verantwortlicher:1, wachschutz:2, sekretariat:2, admin:3 };
+function higherRole(a, b){ if(!a) return b; if(!b) return a; return (ROLE_RANK[b]||0) > (ROLE_RANK[a]||0) ? b : a; }
 function myAccess(){
   if (isAdmin()) return { role:'admin', werke: WERKE.slice() };
-  for (const id of _myIdentities()){ if (accessUsers[id]) return accessUsers[id]; }
-  return null; // kein Zugriff
+  let role = null; const werke = new Set();
+  // direkte Nutzer-Freigaben
+  for (const id of _myIdentities()){ const u = accessUsers[id]; if(u){ role = higherRole(role, u.role); (u.werke||[]).forEach(x=>werke.add(x)); } }
+  // Gruppen-Freigaben (Sicherheitsgruppen, gematcht über Objekt-ID)
+  for (const gid in accessGroups){ if(_myGroupIds.has(gid)){ const g = accessGroups[gid]; role = higherRole(role, g.role); (g.werke||[]).forEach(x=>werke.add(x)); } }
+  return role ? { role, werke:[...werke] } : null;   // kein Zugriff → null
 }
 function allowedWerke(){ const a = myAccess(); return a ? a.werke.slice() : []; }
 function myRole(){ const a = myAccess(); return a ? a.role : null; }
@@ -228,7 +248,7 @@ async function _findConfigList(){
 // 'ok' | 'no-list' (Liste fehlt/nicht sichtbar) | 'read-failed' (keine Leseberechtigung) | 'parse-failed'
 let accessLoadState = 'unknown';
 async function loadAccessConfig(){
-  accessUsers={}; accessConfigItemId=null; accessListId=null; accessLoadState='unknown'; appSettings={ shbActive:true };
+  accessUsers={}; accessGroups={}; accessConfigItemId=null; accessListId=null; accessLoadState='unknown'; appSettings={ shbActive:true };
   try{
     if(!siteId){ accessLoadState='no-list'; return; }
     const lid = await _findConfigList();
@@ -243,9 +263,11 @@ async function loadAccessConfig(){
       try{ parsed = JSON.parse(_decodeSpText(item.fields?.ConfigValue)||'{}'); }
       catch(e){ accessLoadState='parse-failed'; console.warn('[Zugriff] JSON-Fehler:', e.message); return; }
       const raw = parsed.users||{};
+      const rawG = parsed.groups||{};
       appSettings = Object.assign({ shbActive:true }, parsed.settings||{});
       // Schlüssel klein schreiben (robuster Abgleich mit den Nutzer-Identitäten)
       Object.keys(raw).forEach(u=>{ const v=raw[u]||{}; accessUsers[String(u).trim().toLowerCase()]={ role:v.role||'verantwortlicher', werke:Array.isArray(v.werke)?v.werke:[] }; });
+      Object.keys(rawG).forEach(g=>{ const v=rawG[g]||{}; accessGroups[String(g).trim().toLowerCase()]={ role:v.role||'verantwortlicher', werke:Array.isArray(v.werke)?v.werke:[], label:v.label||'' }; });
     }
     accessLoadState='ok';
   }catch(e){ accessLoadState='read-failed'; console.warn('[Zugriff]', e.message); }
@@ -255,7 +277,7 @@ async function saveAccessConfig(){
   try{
     const lid = await _findConfigList();
     if(!lid){ toast("Liste '"+ACCESS_LIST_NAME+"' nicht gefunden – siehe SETUP.md.",'error'); return; }
-    const fields = { Title: ACCESS_ITEM_TITLE, ConfigValue: JSON.stringify({ users: accessUsers, settings: appSettings }) };
+    const fields = { Title: ACCESS_ITEM_TITLE, ConfigValue: JSON.stringify({ users: accessUsers, groups: accessGroups, settings: appSettings }) };
     if (accessConfigItemId) await gPatch(`/sites/${siteId}/lists/${lid}/items/${accessConfigItemId}/fields`, fields);
     else { const cr = await gPost(`/sites/${siteId}/lists/${lid}/items`, { fields }); accessConfigItemId = cr.id; }
     toast('Zugriffsrechte gespeichert ✓','success');
@@ -1317,6 +1339,7 @@ function renderAnleitung(){
     ${admin ? sect('8 · Zugriffsverwaltung (Admin)', `
       <p>Unter <button class="link-btn" onclick="openSettings()">⚙️ Einstellungen</button> → <b>Zugriffsverwaltung</b>:
       E-Mail/UPN hinzufügen, <b>Rolle</b> wählen und <b>Werke</b> freigeben. Neue Nutzer starten als SHB-Verantwortlicher.
+      Alternativ ganze <b>Entra-Sicherheitsgruppen</b> per Objekt-ID freigeben – Mitglieder erhalten den Zugriff automatisch.
       Warten Sie nach dem Eintragen auf die Meldung <b>„gespeichert ✓"</b>. Dort lässt sich auch die
       <b>Sicherheitsunterweisung global aktivieren/deaktivieren</b>, der <b>Kiosk-Modus</b> (automatische Abmeldung
       nach Inaktivität) einstellen und unter <b>DSGVO – Betroffenenrechte</b>
@@ -1395,6 +1418,17 @@ function openSettings(){
         <div style="font-size:.78rem;font-weight:600;color:#374151;margin-bottom:4px">Freigegebene Werke</div>
         <div class="werk-picker">${werkChecks(upn,p.werke)}</div>
       </div>`).join('') || '<p class="su-empty" style="color:#9ca3af;font-size:.85rem">Noch keine Nutzer freigegeben.</p>';
+    const gWerkChecks = (gid, werke) => WERKE.map(w=>`<label><input type="checkbox" ${werke.includes(w)?'checked':''} onchange="toggleGroupWerk('${esc(gid)}','${w}',this.checked)"> ${w}</label>`).join('');
+    const groupBlocks = Object.entries(accessGroups).sort((a,b)=>(a[1].label||a[0]).localeCompare(b[1].label||b[0])).map(([gid,p])=>`
+      <div class="visitor-row" style="background:#fff">
+        <div class="vr-head"><span class="vr-title">${esc(p.label||'(ohne Bezeichnung)')}</span>
+          <button class="vr-del" onclick="removeAccessGroup('${esc(gid)}')" title="Entfernen">✕</button></div>
+        <div class="field-sub" style="margin-bottom:6px;word-break:break-all">ID: ${esc(gid)}</div>
+        <div class="form-group" style="margin-bottom:8px"><label>Rolle</label>
+          <select onchange="setGroupRole('${esc(gid)}',this.value)">${roleOpts(p.role)}</select></div>
+        <div style="font-size:.78rem;font-weight:600;color:#374151;margin-bottom:4px">Freigegebene Werke</div>
+        <div class="werk-picker">${gWerkChecks(gid,p.werke)}</div>
+      </div>`).join('') || '<p class="su-empty" style="color:#9ca3af;font-size:.85rem">Noch keine Gruppen freigegeben.</p>';
     adminBlock = `
       <hr class="modal-hr">
       <div class="settings-section-title">🖊 Sicherheitsunterweisung</div>
@@ -1419,6 +1453,15 @@ function openSettings(){
       </div>
       ${userBlocks}
       <hr class="modal-hr">
+      <div class="settings-section-title">👥 Zugriff per Sicherheitsgruppe</div>
+      <p class="field-sub" style="margin-bottom:8px">Ganze Entra-Sicherheitsgruppen freigeben – Mitglieder erhalten den Zugriff automatisch. <b>Objekt-ID</b> der Gruppe aus Entra (Gruppen &rarr; Gruppe &rarr; Objekt-ID) einfügen und eine Bezeichnung vergeben. Zugriff = höchste Rolle + Vereinigung der Werke aus allen zutreffenden Gruppen/Nutzer-Freigaben.</p>
+      <div class="su-add" style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+        <input type="text" id="access-new-gid" placeholder="Gruppen-Objekt-ID (GUID)" class="su-input" style="min-width:230px">
+        <input type="text" id="access-new-glabel" placeholder="Bezeichnung (z. B. Empfang SHB)" class="su-input">
+        <button class="btn btn-sm btn-primary" onclick="addAccessGroup()">+ Hinzufügen</button>
+      </div>
+      ${groupBlocks}
+      <hr class="modal-hr">
       <div class="settings-section-title">🔎 DSGVO – Betroffenenrechte</div>
       <p class="field-sub" style="margin-bottom:8px">Besucher per Name oder E-Mail suchen, Daten als Auskunft exportieren (Art. 15) oder löschen (Art. 17).</p>
       <div class="su-add" style="display:flex;gap:8px;margin-bottom:6px">
@@ -1441,6 +1484,19 @@ function removeAccessUser(upn){ delete accessUsers[(upn||'').trim().toLowerCase(
 function setRole(upn,role){ upn=(upn||'').toLowerCase(); if(accessUsers[upn]){ accessUsers[upn].role=role; saveAccessConfig(); } }
 function setShbActive(on){ if(!isAdmin()) return; appSettings.shbActive = !!on; saveAccessConfig(); }
 function toggleWerk(upn,werk,on){ upn=(upn||'').toLowerCase(); if(!accessUsers[upn]) return; const s=new Set(accessUsers[upn].werke); on?s.add(werk):s.delete(werk); accessUsers[upn].werke=[...s]; saveAccessConfig(); }
+// ── Sicherheitsgruppen-Freigaben ──
+const GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function addAccessGroup(){
+  const gid=($id('access-new-gid')?.value||'').trim().toLowerCase();
+  const label=($id('access-new-glabel')?.value||'').trim();
+  if(!GUID_RE.test(gid)){ toast('Bitte eine gültige Gruppen-Objekt-ID (GUID) eingeben.','error'); return; }
+  if(!accessGroups[gid]) accessGroups[gid]={ role:'verantwortlicher', werke:[], label: label||'' };
+  else if(label) accessGroups[gid].label=label;
+  saveAccessConfig(); openSettings();
+}
+function removeAccessGroup(gid){ delete accessGroups[(gid||'').trim().toLowerCase()]; saveAccessConfig(); openSettings(); }
+function setGroupRole(gid,role){ gid=(gid||'').toLowerCase(); if(accessGroups[gid]){ accessGroups[gid].role=role; saveAccessConfig(); } }
+function toggleGroupWerk(gid,werk,on){ gid=(gid||'').toLowerCase(); if(!accessGroups[gid]) return; const s=new Set(accessGroups[gid].werke); on?s.add(werk):s.delete(werk); accessGroups[gid].werke=[...s]; saveAccessConfig(); }
 
 function showPrivacyNotice(){
   $id('modal-title').textContent = 'Datenschutzhinweis für Besucher';
@@ -1482,6 +1538,7 @@ async function boot(){
     if(!account){ $id('boot-spinner').style.display='none'; $id('boot-btn').style.display='inline-block'; bootSub('Bitte anmelden.'); return; }
     bootSub('Lade Berechtigungen …');
     await loadMyIdentities();
+    await loadMyGroups();
     await discoverSP();
     await loadAccessConfig();
 
@@ -1506,7 +1563,7 @@ async function boot(){
       eb.innerHTML =
         `Kein Zugriff freigeschaltet – angemeldet als <b>${esc(myUPN())}</b>.<br><br>${detail}` +
         (showIds ? `<br><span style="font-size:.85em">${ids.map(esc).join('<br>')}</span>` : '') +
-        `<br><br><span style="font-size:.8em;color:#9ca3af">Diagnose: Konfig-Liste ${accessListId?'gefunden':'nicht gefunden'} · Status „${esc(accessLoadState)}" · ${cnt} Nutzer freigeschaltet.</span>`;
+        `<br><br><span style="font-size:.8em;color:#9ca3af">Diagnose: Konfig-Liste ${accessListId?'gefunden':'nicht gefunden'} · Status „${esc(accessLoadState)}" · ${cnt} Nutzer, ${Object.keys(accessGroups).length} Gruppen freigeschaltet · du bist in ${_myGroupIds.size} Gruppe(n).</span>`;
       $id('boot-btn').style.display='inline-block'; $id('boot-btn').textContent='Erneut versuchen'; $id('boot-btn').onclick=()=>location.reload();
       return;
     }
