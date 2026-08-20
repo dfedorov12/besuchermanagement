@@ -81,7 +81,7 @@ Die App legt das `access`-Element selbst an; die **Liste** muss manuell existier
 (u. a. `shbActive` – Sicherheitsunterweisung global an/aus).
 Admin (`administrator@dihag.com`) pflegt in der App unter ⚙️ **Rolle + freigegebene Werke** (je Nutzer **oder** Gruppe) und die **SHB-Einstellung**.
 
-**Zugriff per Sicherheitsgruppe:** Admin fügt die **Objekt-ID** einer Entra-Sicherheitsgruppe hinzu (Entra → Gruppen → Gruppe → Objekt-ID) samt Bezeichnung, Rolle und Werken. Mitglieder erhalten den Zugriff automatisch. Die Gruppen­mitgliedschaft wird über `POST /me/getMemberGroups` ermittelt – das funktioniert mit dem vorhandenen `User.Read`, **keine Zusatzberechtigung** nötig. Zugriff eines Nutzers = höchste Rolle + Vereinigung der Werke aus allen zutreffenden Nutzer-/Gruppen-Freigaben.
+**Zugriff per Gruppe:** Admin fügt die **Objekt-ID** einer Entra-Gruppe hinzu (Entra → Gruppen → Gruppe → Objekt-ID) samt Bezeichnung, Rolle und Werken. Unterstützt **alle Gruppentypen** – Sicherheits-, Microsoft-365-, Verteiler- und **dynamische** Gruppen. Mitglieder erhalten den Zugriff automatisch. Die Gruppen­mitgliedschaft wird über `POST /me/getMemberGroups` (`securityEnabledOnly:false`) ermittelt – das funktioniert mit dem vorhandenen `User.Read`, **keine Zusatzberechtigung** nötig. Zugriff eines Nutzers = höchste Rolle + Vereinigung der Werke aus allen zutreffenden Nutzer-/Gruppen-Freigaben.
 
 **Rollen:**
 - `verantwortlicher` – legt Anmeldungen an und sieht **nur eigene** Datensätze; kein Dashboard, keine Reports.

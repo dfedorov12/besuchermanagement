@@ -183,14 +183,16 @@ async function loadMyIdentities(){
     (me.proxyAddresses||[]).forEach(add);
   }catch(e){ console.warn('[ident]', e.message); }
 }
-// Sicherheitsgruppen des angemeldeten Nutzers (Objekt-IDs, transitiv).
-// Nutzt /me/getMemberGroups – funktioniert mit dem vorhandenen User.Read, keine Zusatzberechtigung.
+// Alle Gruppen des angemeldeten Nutzers (Objekt-IDs, transitiv): Sicherheits-,
+// Microsoft-365-, Verteiler- und dynamische Gruppen. securityEnabledOnly:false =
+// ALLE Gruppentypen. Nutzt /me/getMemberGroups – funktioniert mit dem vorhandenen
+// User.Read, keine Zusatzberechtigung.
 async function loadMyGroups(){
   _myGroupIds = new Set();
   const claim = account?.idTokenClaims?.groups;   // falls „groups"-Claim konfiguriert ist
   if (Array.isArray(claim)) claim.forEach(g=>_myGroupIds.add(String(g).toLowerCase()));
   try{
-    const r = await gPost('/me/getMemberGroups', { securityEnabledOnly: true });
+    const r = await gPost('/me/getMemberGroups', { securityEnabledOnly: false });
     (r.value||[]).forEach(g=>_myGroupIds.add(String(g).toLowerCase()));
   }catch(e){ console.warn('[groups] getMemberGroups:', e.message); }
 }
@@ -1339,7 +1341,7 @@ function renderAnleitung(){
     ${admin ? sect('8 · Zugriffsverwaltung (Admin)', `
       <p>Unter <button class="link-btn" onclick="openSettings()">⚙️ Einstellungen</button> → <b>Zugriffsverwaltung</b>:
       E-Mail/UPN hinzufügen, <b>Rolle</b> wählen und <b>Werke</b> freigeben. Neue Nutzer starten als SHB-Verantwortlicher.
-      Alternativ ganze <b>Entra-Sicherheitsgruppen</b> per Objekt-ID freigeben – Mitglieder erhalten den Zugriff automatisch.
+      Alternativ ganze <b>Entra-Gruppen</b> (Sicherheits-, Microsoft-365-, Verteiler- und dynamische Gruppen) per Objekt-ID freigeben – Mitglieder erhalten den Zugriff automatisch.
       Warten Sie nach dem Eintragen auf die Meldung <b>„gespeichert ✓"</b>. Dort lässt sich auch die
       <b>Sicherheitsunterweisung global aktivieren/deaktivieren</b>, der <b>Kiosk-Modus</b> (automatische Abmeldung
       nach Inaktivität) einstellen und unter <b>DSGVO – Betroffenenrechte</b>
@@ -1453,8 +1455,8 @@ function openSettings(){
       </div>
       ${userBlocks}
       <hr class="modal-hr">
-      <div class="settings-section-title">👥 Zugriff per Sicherheitsgruppe</div>
-      <p class="field-sub" style="margin-bottom:8px">Ganze Entra-Sicherheitsgruppen freigeben – Mitglieder erhalten den Zugriff automatisch. <b>Objekt-ID</b> der Gruppe aus Entra (Gruppen &rarr; Gruppe &rarr; Objekt-ID) einfügen und eine Bezeichnung vergeben. Zugriff = höchste Rolle + Vereinigung der Werke aus allen zutreffenden Gruppen/Nutzer-Freigaben.</p>
+      <div class="settings-section-title">👥 Zugriff per Gruppe</div>
+      <p class="field-sub" style="margin-bottom:8px">Ganze Entra-Gruppen freigeben – <b>Sicherheits-, Microsoft-365-, Verteiler- und dynamische Gruppen</b>. Mitglieder erhalten den Zugriff automatisch. <b>Objekt-ID</b> der Gruppe aus Entra (Gruppen &rarr; Gruppe &rarr; Objekt-ID) einfügen und eine Bezeichnung vergeben. Zugriff = höchste Rolle + Vereinigung der Werke aus allen zutreffenden Gruppen/Nutzer-Freigaben.</p>
       <div class="su-add" style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
         <input type="text" id="access-new-gid" placeholder="Gruppen-Objekt-ID (GUID)" class="su-input" style="min-width:230px">
         <input type="text" id="access-new-glabel" placeholder="Bezeichnung (z. B. Empfang SHB)" class="su-input">

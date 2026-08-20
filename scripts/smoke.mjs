@@ -341,9 +341,10 @@ async function scenarioAccessMatch() {
 async function scenarioGroupAccess() {
   const html = readFileSync(join(root, 'index.html'), 'utf8');
   const GID = '11111111-2222-3333-4444-555555555555';
+  let memberGroupsBody = null;
   const fetch3 = async (url, opts) => {
     const u = String(url); const method = (opts && opts.method) || 'GET';
-    if (method === 'POST' && u.includes('/me/getMemberGroups')) return resp({ value: [ GID.toUpperCase() ] });  // Mitglied (Großschreibung)
+    if (method === 'POST' && u.includes('/me/getMemberGroups')) { memberGroupsBody = JSON.parse(opts.body||'{}'); return resp({ value: [ GID.toUpperCase() ] }); }  // Mitglied (Großschreibung)
     if (u.includes('/me?$select')) return resp({ userPrincipalName:'g@dihag.com', mail:'g@dihag.com', otherMails:[], proxyAddresses:[] });
     if (u.includes('dihag.sharepoint.com:/sites/IT') && !u.includes('/lists')) return resp({ id:'siteid' });
     if (u.includes('/lists/Besucheranmeldung')) return resp({ id:'listid', displayName:'Besucheranmeldung' });
@@ -364,10 +365,11 @@ async function scenarioGroupAccess() {
   src += `\n;window.__app3 = { get role(){return myRole()}, isFull, get werke(){return allowedWerke()}, get access(){return myAccess()} };`;
   w.eval(src);
   for (let i=0; i<60 && !(w.__app3 && w.__app3.access); i++) await sleep(50);
-  ok(w.document.getElementById('app').style.display === '', 'Zugriff über Sicherheitsgruppe gewährt');
+  ok(w.document.getElementById('app').style.display === '', 'Zugriff über Gruppe gewährt');
   ok(w.__app3.role === 'sekretariat', 'Rolle aus Gruppe (sekretariat)');
   ok(w.__app3.werke.includes('SHB'), 'Werke aus Gruppe (SHB)');
   ok(w.__app3.isFull(), 'Gruppen-Rolle vollberechtigt');
+  ok(memberGroupsBody && memberGroupsBody.securityEnabledOnly === false, 'getMemberGroups: alle Gruppentypen (securityEnabledOnly:false)');
 }
 
 main().catch(e => { console.error('Smoke-Test-Ausnahme:', e); process.exit(1); });
