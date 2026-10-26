@@ -517,12 +517,9 @@ function renderNewForm(){
 
     <div id="shb-section">
       <div class="form-sub-h">Sicherheitsunterweisung (SHB)</div>
-      <label style="display:flex;align-items:center;gap:8px;font-size:.88rem"><input type="checkbox" id="f-shb"> Sicherheitshinweise SHB akzeptiert</label>
-      <div id="sig-block" style="margin-top:10px;display:none">
-        <div class="field-sub" style="margin-bottom:4px">Digitale Unterschrift</div>
-        <div class="sig-wrap"><canvas id="sig" class="sig-canvas" width="420" height="150"></canvas></div>
-        <div class="sig-actions"><button class="mini-btn" onclick="clearSig()">Löschen</button></div>
-      </div>
+      <div id="shb-reg-status" class="shb-reg-status">Die Sicherheitshinweise der SHB GmbH müssen dem Besucher gezeigt und von ihm bestätigt werden (Kenntnisnahme und Unterschrift).</div>
+      <button type="button" class="btn btn-outline" id="shb-reg-btn" onclick="openShbForRegistration()">📋 Sicherheitshinweise anzeigen und bestätigen</button>
+      <div id="shb-reg-sig" style="margin-top:10px;display:none"></div>
     </div>
 
     <div class="form-group full" style="margin-top:14px"><label>Bemerkungen</label><textarea id="f-bemerk" rows="2"></textarea></div>
@@ -539,8 +536,7 @@ function renderNewForm(){
     </div>
   </div>`;
   addVisitorRow(true);
-  newSigPad = makeSigPad($id('sig'));
-  $id('f-shb').addEventListener('change', e=>{ $id('sig-block').style.display = e.target.checked ? 'block' : 'none'; });
+  newShb = { confirmed:false, signature:'' };
   document.querySelector(`input[name="anmode"][value="${newMode}"]`).checked = true;
   updateModeUI();
   if (templateItem){ applyTemplate(templateItem); templateItem = null; }
@@ -620,8 +616,16 @@ function makeSigPad(cv){
   cv.addEventListener('touchstart',start,{passive:false}); cv.addEventListener('touchmove',move,{passive:false}); cv.addEventListener('touchend',end);
   return { clear(){ ctx.clearRect(0,0,cv.width,cv.height); hasInk=false; }, hasInk:()=>hasInk, dataUrl:()=>cv.toDataURL('image/png') };
 }
-let newSigPad = null;
-function clearSig(){ newSigPad?.clear(); }
+// SHB-Bestätigung für „Anmeldung vor Ort": wird im Popup gesetzt (openShbForRegistration).
+let newShb = { confirmed:false, signature:'' };
+function openShbForRegistration(){
+  openShbHinweise({ withSignature:true, onConfirm:(sig)=>{
+    newShb = { confirmed:true, signature:sig };
+    const st=$id('shb-reg-status'); if(st){ st.innerHTML='✅ Sicherheitshinweise bestätigt und unterschrieben.'; st.classList.add('ok'); }
+    const b=$id('shb-reg-btn'); if(b) b.textContent='Erneut anzeigen / neu bestätigen';
+    const sp=$id('shb-reg-sig'); if(sp){ if(sig){ sp.style.display='block'; sp.innerHTML=`<div class="field-sub">Unterschrift</div><img src="${sig}" class="shb-sig-preview" alt="Unterschrift">`; } else { sp.style.display='none'; sp.innerHTML=''; } }
+  }});
+}
 
 // Setzt ein Feld nur, wenn die Spalte existiert und der Wert nicht leer ist.
 // Verhindert Graph-400 „Invalid request" durch nicht vorhandene Spalten.
@@ -665,12 +669,11 @@ async function submitNew(){
   const firma = $id('f-firma').value.trim();
   // SHB nur bei „vor Ort" und wenn global aktiv erforderlich; bei Voranmeldung später (Schritt 2)
   const shbRequired = shbActive() && newMode==='vorort';
-  const shb = shbRequired && $id('f-shb').checked;
+  const shb = shbRequired && newShb.confirmed;
   if(!werk || !bereich || !ansprech || !datum || !firma){ toast('Bitte Pflichtfelder (Werk, Bereich, Ansprechpartner, Datum, Firma) ausfüllen.','error'); return; }
   if(!allowedWerke().includes(werk)){ toast('Keine Berechtigung für dieses Werk.','error'); return; }
   const zweck = [...document.querySelectorAll('input[name="zweck"]:checked')].map(c=>c.value);
-  if(shbRequired && !$id('f-shb').checked){ toast('Sicherheitsunterweisung (SHB) muss bestätigt werden.','error'); return; }
-  if(shbRequired && !newSigPad?.hasInk()){ toast('Bitte digital unterschreiben (SHB-Bestätigung).','error'); return; }
+  if(shbRequired && !newShb.confirmed){ toast('Bitte die Sicherheitshinweise anzeigen und vom Besucher bestätigen lassen.','error'); openShbForRegistration(); return; }
   const rows = [...document.querySelectorAll('#visitors .visitor-row')];
   const visitors = rows.map(r=>({
     name: joinName(r.querySelector('[data-f="nachname"]').value, r.querySelector('[data-f="vorname"]').value),
@@ -686,7 +689,7 @@ async function submitNew(){
   const dups = visitors.filter(v=>findDuplicate(v.name, firma, datum)).map(v=>v.name);
   if(dups.length && !confirm(`Für ${new Date(datum+'T00:00:00').toLocaleDateString('de-DE')} ist bereits eine Anmeldung vorhanden für: ${dups.join(', ')} (${firma}). Trotzdem speichern?`)) return;
 
-  const sig = shb && newSigPad?.hasInk() ? newSigPad.dataUrl() : '';
+  const sig = shb && newShb.signature ? newShb.signature : '';
   const gruppenId = 'G'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
   // Geplante Ankunftszeit nur bei Voranmeldung (vor Ort nicht benötigt)
   const ankunftIso = (newMode==='voranmeldung' && $id('f-ankunft').value) ? new Date(datum+'T'+$id('f-ankunft').value).toISOString() : null;
@@ -965,31 +968,91 @@ function resetIdle(){
 function setKioskTimeout(v){ if(!isAdmin()) return; appSettings.kioskTimeoutMin = Math.max(0, parseInt(v,10)||0); saveAccessConfig(); resetIdle(); }
 ['mousemove','keydown','click','touchstart','scroll'].forEach(ev => window.addEventListener(ev, resetIdle, { passive:true }));
 
-// ── SICHERHEITSUNTERWEISUNG NACHHOLEN (Schritt 2) ───────────────────────────
-let shbSigPad = null;
+// ── SICHERHEITSHINWEISE (SHB) ───────────────────────────────────────────────
+// Verbindliche Anordnungen der SHB GmbH für Besucher. Inhalt wörtlich aus dem
+// Merkblatt „Sicherheitshinweise für Besucher der SHB GmbH" (Stand 22.10.2026).
+// Werden als Popup gezeigt; der Besucher bestätigt am Ende (Kenntnisnahme +
+// digitale Unterschrift), bevor er das Gelände betritt.
+const SHB_ALLGEMEIN = 'Die nachfolgenden Punkte sind verbindliche Anordnungen für die Umsetzung der Verhaltensregeln der SHB GmbH und Voraussetzung für das Betreten des Betriebsgeländes. Alle Mitarbeiter von Fremdfirmen und Besucher sind verpflichtet, diese Regeln während des Aufenthaltes auf dem Werksgelände zu befolgen.';
+const SHB_PUNKTE = [
+  { n:1,  text:'Das Betreten der Werkshallen ist nur in Begleitung eines Werksangehörigen gestattet. Den Anweisungen der verantwortlichen Person ist jederzeit Folge zu leisten.', imgs:[['01-zutritt.png','Zutritt nur in Begleitung']] },
+  { n:2,  text:'Alle Besucher haben während des Aufenthaltes in der SHB GmbH auf dem Werksgelände und in den Werkshallen eine Warnweste zu tragen.', imgs:[['02-warnweste.png','Warnweste tragen']] },
+  { n:3,  text:'Grundsätzlich gilt für das Betreten der Werkshallen die Tragepflicht von Sicherheitsschuhen S 3.', imgs:[['03-schuhe.png','Sicherheitsschuhe S3 tragen']] },
+  { n:4,  text:'Für alle Besucher gilt für das Betreten der Werkshallen unbedingte Helm- und zum Teil Schutzbrillenpflicht.', imgs:[['04-helm.png','Schutzhelm tragen'],['04-schutzbrille.png','Schutzbrille tragen']] },
+  { n:5,  text:'Auf dem Werksgelände gilt die Straßenverkehrsordnung. Die zulässige Höchstgeschwindigkeit beträgt 10 km/h. Parken ist nur auf den ausgewiesenen Flächen gestattet!', imgs:[['05-tempo10.png','Höchstgeschwindigkeit 10 km/h']] },
+  { n:6,  text:'Auf dem gesamten Gelände besteht Handy- &amp; Fotografierverbot. Ausnahmen müssen generell von der Geschäftsführung genehmigt werden.', imgs:[['06-handy-foto.png','Handy- und Fotografierverbot']] },
+  { n:7,  text:'Der Konsum und das Einbringen von Alkohol und sonstigen Drogen ist strengstens untersagt.', imgs:[['07-alkohol-drogen.png','Alkohol- und Drogenverbot']] },
+  { n:8,  text:'Besucher müssen vor dem Betreten der Werkhalle unaufgefordert angeben, ob sie ein aktives und/oder passives medizinisches Implantat tragen.', imgs:[['08-implantat.png','Medizinische Implantate angeben']] },
+  { n:9,  text:'In allen Eingangsbereichen hängen Flucht- und Rettungswegepläne. Bitte orientieren Sie sich.', imgs:[['09-fluchtweg.png','Flucht- und Rettungswege']] },
+  { n:10, text:'Bei einem Brand, Unfall oder sonstigen Störfällen bewahren Sie bitte Ruhe und wenden sich an unsere Mitarbeiter.<ul class="shb-sub"><li>Flucht- und Rettungswege sind gekennzeichnet.</li><li>Feuerlöscheinrichtungen sind gekennzeichnet.</li></ul>', imgs:[['09-fluchtweg.png','Flucht- und Rettungswege'],['10-feuerloescher.png','Feuerlöscheinrichtung']] },
+  { n:11, text:'Bei Unfällen und Verletzungen stehen im Werk ausreichend Ersthelfer zur Verfügung.', imgs:[['11-ersthelfer.png','Erste Hilfe']] },
+  { n:12, text:'Not- &amp; Unfälle oder Feuer sind zusätzlich der Wache zu melden (Sächs. Wach- und Schließgesellschaft Leipzig), Festnetz +49 (0) 341 / 42799 (intern App. 9).', imgs:[['12-notruf.png','Notruf / Wache melden']] },
+];
+function _shbPikto([src,alt]){ return `<img class="shb-pikto" src="assets/shb/${src}" alt="${esc(alt)}" title="${esc(alt)}" loading="lazy">`; }
+function shbHinweiseHtml(){
+  const items = SHB_PUNKTE.map(p=>`
+    <div class="shb-item">
+      <div class="shb-num">${p.n}</div>
+      <div class="shb-text">${p.text}</div>
+      <div class="shb-pikts">${(p.imgs||[]).map(_shbPikto).join('')}</div>
+    </div>`).join('');
+  return `<div class="shb-doc">
+    <p class="shb-allg">${SHB_ALLGEMEIN}</p>
+    <div class="shb-list">${items}</div>
+  </div>`;
+}
+
+// Wiederverwendbares Popup: zeigt die Sicherheitshinweise, verlangt am Ende die
+// Kenntnisnahme (Checkbox erst nach vollständigem Scrollen aktiv) und – sofern
+// gewünscht – die digitale Unterschrift. opts.onConfirm(signaturDataUrl).
+let _shbHinweisePad = null, _shbOnConfirm = null, _shbWithSig = true;
+function openShbHinweise(opts){
+  opts = opts || {};
+  _shbWithSig = opts.withSignature !== false;
+  _shbOnConfirm = opts.onConfirm || null;
+  $id('modal-title').textContent = 'Sicherheitshinweise für Besucher der SHB GmbH' + (opts.subtitle ? ' – ' + opts.subtitle : '');
+  $id('modal-body').innerHTML = `
+    <div id="shb-scroll" class="shb-scroll">${shbHinweiseHtml()}</div>
+    <div class="shb-confirm">
+      <label class="shb-ack"><input type="checkbox" id="shb-ack" disabled onchange="_shbUpdateBtn()">
+        Ich habe die Sicherheitshinweise gelesen und verstanden und werde sie befolgen.</label>
+      <div class="shb-ack-hint" id="shb-ack-hint">Bitte bis zum Ende lesen – dann wird die Bestätigung aktiv.</div>
+      ${_shbWithSig ? `<div class="field-sub" style="margin-top:10px">Digitale Unterschrift des Besuchers</div>
+        <div class="sig-wrap"><canvas id="shb-sig" class="sig-canvas" width="420" height="150"></canvas></div>
+        <div class="sig-actions"><button class="mini-btn" type="button" onclick="_shbHinweisePad && _shbHinweisePad.clear()">Löschen</button></div>` : ''}
+    </div>`;
+  $id('modal-footer').innerHTML = `<button class="btn btn-ghost" onclick="closeModal()">Abbrechen</button>
+    <button class="btn btn-primary" id="shb-confirm-btn" onclick="_shbBestaetigen()" disabled>Bestätigen</button>`;
+  $id('modal-overlay').classList.remove('hidden'); focusModal('modal-overlay');
+  _shbHinweisePad = _shbWithSig ? makeSigPad($id('shb-sig')) : null;
+  // Scroll-Gate: Kenntnisnahme erst, wenn bis zum Ende gescrollt wurde.
+  const sc = $id('shb-scroll'), ack = $id('shb-ack'), hint = $id('shb-ack-hint');
+  const check = ()=>{ if(sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 24){ if(ack) ack.disabled=false; if(hint) hint.style.display='none'; sc.removeEventListener('scroll', check); } };
+  sc.addEventListener('scroll', check); setTimeout(check, 80); // Inhalt kürzer als Fenster → sofort frei
+}
+function _shbUpdateBtn(){ const b=$id('shb-confirm-btn'); if(b) b.disabled = !$id('shb-ack')?.checked; }
+function _shbBestaetigen(){
+  if(!$id('shb-ack')?.checked){ toast('Bitte die Kenntnisnahme bestätigen.','error'); return; }
+  if(_shbWithSig && !_shbHinweisePad?.hasInk()){ toast('Bitte digital unterschreiben.','error'); return; }
+  const sig = (_shbWithSig && _shbHinweisePad) ? _shbHinweisePad.dataUrl() : '';
+  const cb = _shbOnConfirm; _shbOnConfirm = null;
+  closeModal();
+  if(cb) cb(sig);
+}
+
+// Schritt 2 am Empfang: Sicherheitsunterweisung zu einem Datensatz nachholen.
 function openSHBModal(id){
   const i = ITEMS.find(x=>x.id===id);
   if(!i){ toast('Datensatz nicht gefunden.','error'); return; }
   if(!canStamp()){ toast('Keine Berechtigung.','error'); return; }
-  $id('modal-title').textContent = 'Sicherheitsunterweisung – ' + i.besucherName;
-  $id('modal-body').innerHTML = `
-    <p style="font-size:.86rem;color:#374151;margin-bottom:8px">Sicherheitshinweise (SHB) mit dem Besucher durchgehen und bestätigen lassen.</p>
-    <label style="display:flex;align-items:center;gap:8px;font-size:.88rem;margin-bottom:10px"><input type="checkbox" id="shb-ok"> Sicherheitshinweise SHB akzeptiert</label>
-    <div class="field-sub" style="margin-bottom:4px">Digitale Unterschrift</div>
-    <div class="sig-wrap"><canvas id="sig-modal" class="sig-canvas" width="420" height="150"></canvas></div>
-    <div class="sig-actions"><button class="mini-btn" onclick="shbSigPad && shbSigPad.clear()">Löschen</button></div>`;
-  $id('modal-footer').innerHTML = `<button class="btn btn-ghost" onclick="closeModal()">Abbrechen</button><button class="btn btn-primary" onclick="saveSHB('${id}')">Bestätigen</button>`;
-  $id('modal-overlay').classList.remove('hidden'); focusModal('modal-overlay');
-  shbSigPad = makeSigPad($id('sig-modal'));
+  openShbHinweise({ subtitle: i.besucherName, withSignature:true, onConfirm:(sig)=>saveSHB(id, sig) });
 }
-async function saveSHB(id){
-  if(!$id('shb-ok')?.checked){ toast('Bitte „SHB akzeptiert" bestätigen.','error'); return; }
-  if(!shbSigPad?.hasInk()){ toast('Bitte digital unterschreiben.','error'); return; }
-  const fields={}; putField(fields,'SHBAkzeptiert', true); putField(fields,'Signatur', shbSigPad.dataUrl());
+async function saveSHB(id, sig){
+  const fields={}; putField(fields,'SHBAkzeptiert', true); if(sig) putField(fields,'Signatur', sig);
   try{
     await gPatch(`/sites/${siteId}/lists/${listId}/items/${id}/fields`, fields);
     toast('Sicherheitsunterweisung erfasst ✓','success');
-    closeModal(); await loadItems();
+    await loadItems();
     if(currentView==='detail') navigate('detail', id);
   }catch(e){ toast('Speichern fehlgeschlagen: '+e.message,'error'); }
 }
@@ -1303,7 +1366,7 @@ function renderAnleitung(){
         <li><b>Werk</b>, <b>Bereich</b>, <b>Ansprechpartner</b> (Gastgeber), <b>Datum</b> und <b>Firma</b> ausfüllen (Pflichtfelder mit <span class="req">*</span>).</li>
         <li>Besucher eintragen; mit <b>„+ weitere Person (gleiche Firma)"</b> mehrere Personen ergänzen. Name und Firma bieten <b>Vorschläge aus früheren Besuchen</b>. Optionale Felder nur bei Bedarf.</li>
         <li><b>Besuchszweck</b> und ausgegebene <b>PSA</b> ankreuzen.</li>
-        <li>Bei „vor Ort": <b>SHB akzeptiert</b> anhaken und <b>digital unterschreiben</b> (Maus/Finger).</li>
+        <li>Bei „vor Ort": <b>„Sicherheitshinweise anzeigen und bestätigen"</b> öffnen. Der Besucher liest die Hinweise der SHB GmbH bis zum Ende, bestätigt die <b>Kenntnisnahme</b> und <b>unterschreibt digital</b> (Maus/Finger).</li>
         <li><b>Speichern</b> – danach können Sie sofort eine Einladung senden (siehe 5).</li>
       </ol>`)}
 

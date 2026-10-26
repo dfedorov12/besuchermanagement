@@ -1376,3 +1376,28 @@ details#attach-extra-wrap[open] .attach-more-toggle { color:#374151; }
 /* ── Besuchermanagement: CheckOut rot (wer noch anwesend ist) ─────────────── */
 .btn-checkout{background:#dc2626;color:#fff}
 .btn-checkout:hover{background:#b91c1c}
+
+/* ── Besuchermanagement: Sicherheitshinweise (SHB) Popup ─────────────────── */
+.modal:has(.shb-scroll){ max-width: 640px; }
+.shb-scroll{ max-height: 46vh; overflow-y: auto; border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px 14px; background: #fff; }
+.shb-doc .shb-allg{ font-size: .82rem; line-height: 1.5; color: #374151; background: #f8fafc; border-left: 3px solid #1a56db; padding: 8px 10px; border-radius: 6px; margin: 0 0 12px; }
+.shb-list{ display: flex; flex-direction: column; gap: 10px; }
+.shb-item{ display: grid; grid-template-columns: 26px 1fr auto; gap: 10px; align-items: start; padding-bottom: 10px; border-bottom: 1px solid #f1f5f9; }
+.shb-item:last-child{ border-bottom: none; padding-bottom: 0; }
+.shb-num{ width: 26px; height: 26px; border-radius: 50%; background: #1a2644; color: #fff; font-size: .8rem; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+.shb-text{ font-size: .85rem; line-height: 1.5; color: #1e2939; }
+.shb-sub{ margin: 4px 0 0; padding-left: 18px; }
+.shb-sub li{ font-size: .8rem; color: #4b5563; }
+.shb-pikts{ display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.shb-pikto{ width: 52px; height: 52px; object-fit: contain; }
+.shb-confirm{ margin-top: 14px; padding-top: 12px; border-top: 2px solid #f1f5f9; }
+.shb-ack{ display: flex; gap: 9px; align-items: flex-start; font-size: .88rem; font-weight: 600; color: #1e2939; line-height: 1.4; cursor: pointer; }
+.shb-ack input{ margin-top: 2px; width: 17px; height: 17px; flex-shrink: 0; }
+.shb-ack-hint{ font-size: .76rem; color: #b45309; margin: 6px 0 0 26px; }
+.shb-reg-status{ font-size: .82rem; color: #4b5563; margin-bottom: 8px; }
+.shb-reg-status.ok{ color: #15803d; font-weight: 600; }
+.shb-sig-preview{ border: 1px solid #e5e7eb; border-radius: 8px; max-width: 280px; width: 100%; }
+@media (max-width: 560px){
+  .shb-item{ grid-template-columns: 24px 1fr; }
+  .shb-pikts{ grid-column: 1 / -1; justify-content: flex-start; }
+}

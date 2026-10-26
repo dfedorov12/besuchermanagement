@@ -114,7 +114,7 @@ async function main() {
 
   // app.js in der Fensterrealität ausführen + Test-Handles exportieren
   let src = readFileSync(join(root, 'app.js'), 'utf8');
-  src += `\n;window.__app = { submitNew, navigate, applyTemplate, sendSavedInvite, isOverdue, buildCsv, canEditItem, findDuplicate, setNewMode, openSHBModal, saveSHB, shbActive, inDateScope, printAttendance, dsgvoFind, openSettings, sortList, setKioskTimeout, get itemCount(){return ITEMS.length}, get kioskMin(){return Number(appSettings.kioskTimeoutMin)||0}, get HAVE(){return HAVE}, get C(){return C}, WERKE, get account(){return account}, isFull, canSeeDashboard, canSeeReports, isMine };`;
+  src += `\n;window.__app = { submitNew, navigate, applyTemplate, sendSavedInvite, isOverdue, buildCsv, canEditItem, findDuplicate, setNewMode, openSHBModal, saveSHB, openShbHinweise, openShbForRegistration, _shbBestaetigen, SHB_PUNKTE, shbActive, inDateScope, printAttendance, dsgvoFind, openSettings, sortList, setKioskTimeout, get itemCount(){return ITEMS.length}, get kioskMin(){return Number(appSettings.kioskTimeoutMin)||0}, get HAVE(){return HAVE}, get C(){return C}, WERKE, get account(){return account}, isFull, canSeeDashboard, canSeeReports, isMine };`;
   w.eval(src);
 
   // Auf Boot warten (discoverSP füllt HAVE)
@@ -148,13 +148,21 @@ async function main() {
   doc.querySelector('#visitors [data-f="email"]').value = 'max@acme.example'; // Spalte existiert → wird gesendet
   doc.querySelector('input[name="zweck"][value="Audit"]').checked = true;     // Multi-Choice
   doc.querySelector('#visitors [data-psa][value="Schutzhelm"]').checked = true; // Multi-Choice
-  doc.getElementById('f-shb').checked = true;
 
-  // Unterschrift simulieren (setzt sigHasInk = true)
-  const sig = doc.getElementById('sig');
+  // Vor-Ort-SHB: Popup öffnen, Inhalt prüfen, Kenntnisnahme + Unterschrift, bestätigen
+  w.__app.openShbForRegistration();
+  await sleep(10);
+  const shbText = doc.getElementById('shb-scroll')?.textContent || '';
+  ok(/Warnweste/.test(shbText) && /10 km\/h/.test(shbText), 'SHB-Popup zeigt die Sicherheitshinweise');
+  ok(!!doc.getElementById('shb-ack') && !!doc.getElementById('shb-sig'), 'SHB-Popup: Kenntnisnahme + Unterschrift vorhanden');
+  ok(w.__app.SHB_PUNKTE.length === 12, 'SHB: 12 verbindliche Punkte');
+  const ack = doc.getElementById('shb-ack'); ack.disabled = false; ack.checked = true;
+  const sig = doc.getElementById('shb-sig');
   sig.dispatchEvent(new w.MouseEvent('mousedown', { clientX:5, clientY:5 }));
   sig.dispatchEvent(new w.MouseEvent('mousemove', { clientX:9, clientY:9 }));
   w.dispatchEvent(new w.MouseEvent('mouseup', {}));
+  w.__app._shbBestaetigen();
+  await sleep(5);
 
   await w.__app.submitNew();
   await sleep(10);
@@ -209,17 +217,18 @@ async function main() {
   ok(w.__app.canEditItem({}) === true, 'Admin darf bearbeiten');
   ok(w.__app.findDuplicate('Niemand','Nirgends','2026-07-09') === undefined, 'Dublettenprüfung ohne Treffer');
 
-  // SHB nachträglich (Schritt 2) auf einen Datensatz ohne SHB (rec1)
+  // SHB nachträglich (Schritt 2) auf einen Datensatz ohne SHB (rec1): Popup bestätigen
   w.__app.openSHBModal('rec1');
-  await sleep(5);
-  doc.getElementById('shb-ok').checked = true;
-  const sm = doc.getElementById('sig-modal');
+  await sleep(10);
+  ok(/Sicherheitshinweise/.test(doc.getElementById('modal-title').textContent), 'SHB-Popup am Empfang geöffnet');
+  const ack2 = doc.getElementById('shb-ack'); ack2.disabled = false; ack2.checked = true;
+  const sm = doc.getElementById('shb-sig');
   sm.dispatchEvent(new w.MouseEvent('mousedown', { clientX:2, clientY:2 }));
   sm.dispatchEvent(new w.MouseEvent('mousemove', { clientX:6, clientY:6 }));
   w.dispatchEvent(new w.MouseEvent('mouseup', {}));
   const before = patches.length;
-  await w.__app.saveSHB('rec1');
-  await sleep(5);
+  w.__app._shbBestaetigen();
+  await sleep(10);
   const lastPatch = patches[patches.length-1] || {};
   ok(patches.length > before && lastPatch.SHBAkzeptiert === true, 'SHB nachträglich: SHBAkzeptiert gesetzt');
   ok(typeof lastPatch.Signatur === 'string' && lastPatch.Signatur.startsWith('data:image'), 'SHB nachträglich: Unterschrift gespeichert');
