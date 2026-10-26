@@ -114,7 +114,7 @@ async function main() {
 
   // app.js in der Fensterrealität ausführen + Test-Handles exportieren
   let src = readFileSync(join(root, 'app.js'), 'utf8');
-  src += `\n;window.__app = { submitNew, navigate, applyTemplate, sendSavedInvite, isOverdue, buildCsv, canEditItem, findDuplicate, setNewMode, openSHBModal, saveSHB, openShbHinweise, openShbForRegistration, _shbBestaetigen, SHB_PUNKTE, shbActive, inDateScope, printAttendance, dsgvoFind, openSettings, sortList, setKioskTimeout, get itemCount(){return ITEMS.length}, get kioskMin(){return Number(appSettings.kioskTimeoutMin)||0}, get HAVE(){return HAVE}, get C(){return C}, WERKE, get account(){return account}, isFull, canSeeDashboard, canSeeReports, isMine };`;
+  src += `\n;window.__app = { submitNew, navigate, applyTemplate, sendSavedInvite, isOverdue, buildCsv, canEditItem, findDuplicate, setNewMode, openSHBModal, saveSHB, openShbHinweise, openShbForRegistration, openShbVorschau, _shbBestaetigen, SHB_PUNKTE, shbActive, inDateScope, printAttendance, dsgvoFind, openSettings, sortList, setKioskTimeout, get itemCount(){return ITEMS.length}, get kioskMin(){return Number(appSettings.kioskTimeoutMin)||0}, get HAVE(){return HAVE}, get C(){return C}, WERKE, get account(){return account}, isFull, canSeeDashboard, canSeeReports, isMine };`;
   w.eval(src);
 
   // Auf Boot warten (discoverSP füllt HAVE)
@@ -135,10 +135,15 @@ async function main() {
   // Modus-Umschaltung (Voranmeldung vs. vor Ort)
   w.__app.setNewMode('voranmeldung');
   ok(doc.getElementById('ankunft-group').style.display !== 'none', 'Voranmeldung: Ankunftszeit sichtbar');
-  ok(doc.getElementById('shb-section').style.display === 'none', 'Voranmeldung: SHB ausgeblendet');
+  ok(doc.getElementById('shb-reg-vor').style.display !== 'none' && doc.getElementById('shb-reg-vorort').style.display === 'none', 'Voranmeldung: SHB-Vorschau statt Bestätigung');
+  // Vorschau-Popup: nur Ansicht, keine Kenntnisnahme/Unterschrift
+  w.__app.openShbVorschau();
+  await sleep(10);
+  ok(!!doc.getElementById('shb-scroll') && !doc.getElementById('shb-ack') && !doc.getElementById('shb-sig'), 'Voranmeldung-Vorschau: nur Ansicht, keine Bestätigung');
+  doc.getElementById('modal-overlay').classList.add('hidden');
   w.__app.setNewMode('vorort');
   ok(doc.getElementById('ankunft-group').style.display === 'none', 'Vor Ort: Ankunftszeit ausgeblendet');
-  ok(doc.getElementById('shb-section').style.display !== 'none', 'Vor Ort: SHB sichtbar');
+  ok(doc.getElementById('shb-reg-vorort').style.display !== 'none' && doc.getElementById('shb-reg-vor').style.display === 'none', 'Vor Ort: SHB-Bestätigung sichtbar');
   const set = (id, v) => { const el = doc.getElementById(id); el.value = v; };
   set('f-werk', 'SHB'); set('f-bereich', 'Halle 3'); set('f-firma', 'ACME GmbH');
   doc.querySelector('#visitors [data-f="nachname"]').value = 'Mustermann';    // getrennte Namensfelder

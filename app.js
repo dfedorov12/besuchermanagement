@@ -517,9 +517,15 @@ function renderNewForm(){
 
     <div id="shb-section">
       <div class="form-sub-h">Sicherheitsunterweisung (SHB)</div>
-      <div id="shb-reg-status" class="shb-reg-status">Die Sicherheitshinweise der SHB GmbH müssen dem Besucher gezeigt und von ihm bestätigt werden (Kenntnisnahme und Unterschrift).</div>
-      <button type="button" class="btn btn-outline" id="shb-reg-btn" onclick="openShbForRegistration()">📋 Sicherheitshinweise anzeigen und bestätigen</button>
-      <div id="shb-reg-sig" style="margin-top:10px;display:none"></div>
+      <div id="shb-reg-vorort">
+        <div id="shb-reg-status" class="shb-reg-status">Die Sicherheitshinweise der SHB GmbH müssen dem Besucher gezeigt und von ihm bestätigt werden (Kenntnisnahme und Unterschrift).</div>
+        <button type="button" class="btn btn-outline" id="shb-reg-btn" onclick="openShbForRegistration()">📋 Sicherheitshinweise anzeigen und bestätigen</button>
+        <div id="shb-reg-sig" style="margin-top:10px;display:none"></div>
+      </div>
+      <div id="shb-reg-vor">
+        <div class="shb-reg-status">Die Sicherheitsunterweisung erfolgt später am Empfang (Schritt 2). Vorab können Sie die Hinweise hier ansehen.</div>
+        <button type="button" class="btn btn-outline" onclick="openShbVorschau()">📋 Sicherheitshinweise anzeigen (Vorschau)</button>
+      </div>
     </div>
 
     <div class="form-group full" style="margin-top:14px"><label>Bemerkungen</label><textarea id="f-bemerk" rows="2"></textarea></div>
@@ -545,7 +551,9 @@ function setNewMode(m){ newMode = m; updateModeUI(); }
 function updateModeUI(){
   const vor = newMode==='voranmeldung';
   const ank = $id('ankunft-group'); if(ank) ank.style.display = vor ? '' : 'none';           // geplante Ankunftszeit nur bei Voranmeldung
-  const shb = $id('shb-section');   if(shb) shb.style.display = (!vor && shbActive()) ? '' : 'none'; // SHB nur „vor Ort" und wenn aktiv
+  const shb = $id('shb-section');   if(shb) shb.style.display = shbActive() ? '' : 'none';    // SHB-Abschnitt sichtbar, wenn global aktiv
+  const vorort = $id('shb-reg-vorort'); if(vorort) vorort.style.display = vor ? 'none' : '';  // „vor Ort": bestätigen + unterschreiben
+  const vorb   = $id('shb-reg-vor');    if(vorb)   vorb.style.display   = vor ? '' : 'none';  // Voranmeldung: nur Vorschau
 }
 function goHome(){ navigate(canSeeDashboard() ? 'dashboard' : 'records'); }
 
@@ -1008,28 +1016,34 @@ function shbHinweiseHtml(){
 let _shbHinweisePad = null, _shbOnConfirm = null, _shbWithSig = true;
 function openShbHinweise(opts){
   opts = opts || {};
-  _shbWithSig = opts.withSignature !== false;
-  _shbOnConfirm = opts.onConfirm || null;
+  const preview = !!opts.preview;                 // nur ansehen, keine Bestätigung/Unterschrift
+  _shbWithSig = !preview && opts.withSignature !== false;
+  _shbOnConfirm = preview ? null : (opts.onConfirm || null);
   $id('modal-title').textContent = 'Sicherheitshinweise für Besucher der SHB GmbH' + (opts.subtitle ? ' – ' + opts.subtitle : '');
   $id('modal-body').innerHTML = `
     <div id="shb-scroll" class="shb-scroll">${shbHinweiseHtml()}</div>
-    <div class="shb-confirm">
+    ${preview ? '' : `<div class="shb-confirm">
       <label class="shb-ack"><input type="checkbox" id="shb-ack" disabled onchange="_shbUpdateBtn()">
         Ich habe die Sicherheitshinweise gelesen und verstanden und werde sie befolgen.</label>
       <div class="shb-ack-hint" id="shb-ack-hint">Bitte bis zum Ende lesen – dann wird die Bestätigung aktiv.</div>
       ${_shbWithSig ? `<div class="field-sub" style="margin-top:10px">Digitale Unterschrift des Besuchers</div>
         <div class="sig-wrap"><canvas id="shb-sig" class="sig-canvas" width="420" height="150"></canvas></div>
         <div class="sig-actions"><button class="mini-btn" type="button" onclick="_shbHinweisePad && _shbHinweisePad.clear()">Löschen</button></div>` : ''}
-    </div>`;
-  $id('modal-footer').innerHTML = `<button class="btn btn-ghost" onclick="closeModal()">Abbrechen</button>
-    <button class="btn btn-primary" id="shb-confirm-btn" onclick="_shbBestaetigen()" disabled>Bestätigen</button>`;
+    </div>`}`;
+  $id('modal-footer').innerHTML = preview
+    ? `<button class="btn btn-primary" onclick="closeModal()">Schließen</button>`
+    : `<button class="btn btn-ghost" onclick="closeModal()">Abbrechen</button>
+       <button class="btn btn-primary" id="shb-confirm-btn" onclick="_shbBestaetigen()" disabled>Bestätigen</button>`;
   $id('modal-overlay').classList.remove('hidden'); focusModal('modal-overlay');
+  if(preview){ _shbHinweisePad = null; return; }
   _shbHinweisePad = _shbWithSig ? makeSigPad($id('shb-sig')) : null;
   // Scroll-Gate: Kenntnisnahme erst, wenn bis zum Ende gescrollt wurde.
   const sc = $id('shb-scroll'), ack = $id('shb-ack'), hint = $id('shb-ack-hint');
   const check = ()=>{ if(sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 24){ if(ack) ack.disabled=false; if(hint) hint.style.display='none'; sc.removeEventListener('scroll', check); } };
   sc.addEventListener('scroll', check); setTimeout(check, 80); // Inhalt kürzer als Fenster → sofort frei
 }
+// Nur-Vorschau der Sicherheitshinweise (z. B. bei der Voranmeldung für den Gastgeber).
+function openShbVorschau(){ openShbHinweise({ preview:true }); }
 function _shbUpdateBtn(){ const b=$id('shb-confirm-btn'); if(b) b.disabled = !$id('shb-ack')?.checked; }
 function _shbBestaetigen(){
   if(!$id('shb-ack')?.checked){ toast('Bitte die Kenntnisnahme bestätigen.','error'); return; }
